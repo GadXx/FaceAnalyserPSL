@@ -1,0 +1,17 @@
+numpy
+pandas
+pyarrow
+scikit-learn
+torch
+torchvision
+opencv-python
+insightface
+onnxruntime
+xgboost
+lightgbm
+matplotlib
+fastapi
+uvicorn
+pydantic
+pyyaml
+hydra-core

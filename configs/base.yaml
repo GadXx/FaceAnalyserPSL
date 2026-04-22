@@ -1,0 +1,25 @@
+{
+  "project": {
+    "name": "face-aesthetics-scoring",
+    "package_name": "src.face_aesthetics",
+    "environment": "local"
+  },
+  "runtime": {
+    "random_seed": 42,
+    "log_level": "INFO"
+  },
+  "paths": {
+    "project_root": ".",
+    "configs_dir": "configs",
+    "data_dir": "data",
+    "raw_data_dir": "data/raw",
+    "interim_data_dir": "data/interim",
+    "processed_data_dir": "data/processed",
+    "features_data_dir": "data/features",
+    "scripts_dir": "scripts",
+    "source_dir": "src",
+    "package_dir": "src/face_aesthetics",
+    "reports_dir": "reports",
+    "tests_dir": "tests"
+  }
+}

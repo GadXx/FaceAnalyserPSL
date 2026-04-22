@@ -1,0 +1,18 @@
+{
+  "dataset": {
+    "raw_input_dir": "data/raw",
+    "interim_manifest_path": "data/interim/dataset_manifest.parquet",
+    "processed_dataset_path": "data/processed/facial_aesthetics.parquet",
+    "features_table_path": "data/features/features.parquet"
+  },
+  "io": {
+    "parquet_engine": "pyarrow",
+    "allowed_image_extensions": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".bmp",
+      ".webp"
+    ]
+  }
+}

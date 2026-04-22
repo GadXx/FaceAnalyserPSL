@@ -1,0 +1,10 @@
+{
+  "train_baseline": {
+    "enabled": false,
+    "feature_table_path": "data/features/baseline_features.parquet",
+    "target_column": "score",
+    "model_family": "xgboost",
+    "validation_split": 0.2,
+    "random_seed": 42
+  }
+}
