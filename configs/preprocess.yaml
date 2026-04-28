@@ -1,12 +1,83 @@
 {
   "preprocess": {
-    "enabled": false,
-    "input_dir": "data/raw",
+    "enabled": true,
+    "input_manifest_path": "data/interim/dataset_manifest.parquet",
     "output_dir": "data/processed",
+    "aligned_dir": "data/processed/aligned_faces",
+    "three_d_artifacts_dir": "data/processed/3d_artifacts",
+    "output_manifest_path": "data/processed/preprocessed_manifest.parquet",
+    "summary_path": "reports/metrics/preprocessing_summary.json",
+    "progress_path": "data/processed/preprocessing_progress.json",
+    "three_d_summary_path": "reports/metrics/preprocessing_3d_summary.json",
+    "gpu_runtime_check": {
+      "output_path": "reports/metrics/gpu_runtime_check.json",
+      "test_model_file": "det_10g.onnx"
+    },
     "face_backend": "insightface",
     "target_image_size": [224, 224],
     "color_mode": "rgb",
-    "min_face_size": 64,
-    "save_debug_images": false
+    "save_debug_images": false,
+    "runtime": {
+      "batch_size": 64,
+      "limit": null,
+      "offset": 0,
+      "resume": true,
+      "overwrite": false,
+      "num_workers": 4,
+      "preferred_execution_provider": "CUDAExecutionProvider",
+      "fallback_execution_provider": "CPUExecutionProvider",
+      "device_id": 0,
+      "strict_gpu_mode": false,
+      "smoke_mode": false,
+      "smoke_limit": 16
+    },
+    "insightface": {
+      "model_name": "buffalo_l",
+      "model_root": "data/interim/insightface_models",
+      "allowed_modules": [
+        "detection",
+        "landmark_2d_106"
+      ],
+      "required_model_files": [
+        "det_10g.onnx",
+        "2d106det.onnx"
+      ],
+      "providers": [],
+      "preferred_execution_provider": "CUDAExecutionProvider",
+      "fallback_execution_provider": "CPUExecutionProvider",
+      "device_id": 0,
+      "fallback_detector": {
+        "enabled": true,
+        "scale_factor": 1.1,
+        "min_neighbors": 3,
+        "min_size": 30
+      },
+      "ctx_id": -1,
+      "det_size": [640, 640]
+    },
+    "quality_gate": {
+      "require_single_face": true,
+      "min_bbox_size": 64,
+      "min_detector_score": 0.5,
+      "min_blur_variance": 80.0,
+      "max_abs_yaw": 35.0,
+      "max_abs_pitch": 25.0,
+      "max_abs_roll": 35.0,
+      "max_occlusion_score": 0.6
+    },
+    "auto_alignment": {
+      "enabled": true,
+      "min_auto_rotation_deg": 3.0,
+      "max_auto_rotation_deg": 20.0,
+      "alignment_source": "auto",
+      "reprocess_after_alignment": true
+    },
+    "three_d": {
+      "enabled": true,
+      "artifacts_manifest_path": "data/processed/3d_artifacts/manifest.parquet",
+      "template_path": "data/interim/3d_models/canonical_face_5pt.npy",
+      "auto_create_default_template": true,
+      "artifact_version": "template_pose_lift@1"
+    }
   }
 }

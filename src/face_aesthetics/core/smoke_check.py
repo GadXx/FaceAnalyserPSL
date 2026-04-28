@@ -14,12 +14,15 @@ def main() -> None:
 
     configs = load_named_configs(config_dir)
     base_config = configs["base"]
+    project_config = base_config.get("project", {})
     project_paths = resolve_project_paths(
         project_root=project_root,
         configured_paths=base_config.get("paths", {}),
     )
 
     print(f"face_aesthetics version: {__version__}")
+    print(f"project_name: {project_config.get('name')}")
+    print(f"project_domain: {project_config.get('domain')}")
     print(f"config_dir: {config_dir}")
     print("import_check:")
     print(f"  data={data.__name__}")

@@ -1,0 +1,52 @@
+{
+  "artifacts": {
+    "config_snapshot_path": "models/baselines/deep_baseline_config_snapshot.json",
+    "feature_importance_path": "reports/metrics/deep_baseline_feature_importance.csv",
+    "metrics_json_path": "reports/metrics/deep_baseline_metrics.json",
+    "models_dir": "models/baselines",
+    "test_predictions_path": "reports/metrics/deep_baseline_test_predictions.csv",
+    "val_predictions_path": "reports/metrics/deep_baseline_val_predictions.csv"
+  },
+  "derived_split": {
+    "test_size": 0.15,
+    "train_size": 0.7,
+    "val_size": 0.15
+  },
+  "enabled": true,
+  "feature_prefix": "emb_",
+  "image_id_column": "image_id",
+  "input_features_path": "data/features/deep_embeddings.parquet",
+  "models": {
+    "mlp": {
+      "activation": "relu",
+      "alpha": 0.0001,
+      "artifact_path": "models/baselines/mlp_regressor.joblib",
+      "batch_size": 32,
+      "early_stopping": true,
+      "enabled": true,
+      "hidden_layer_sizes": [
+        256,
+        64
+      ],
+      "learning_rate_init": 0.001,
+      "max_iter": 500,
+      "validation_fraction": 0.1
+    },
+    "xgboost": {
+      "artifact_path": "models/baselines/xgboost_regressor.joblib",
+      "colsample_bytree": 0.8,
+      "enabled": true,
+      "learning_rate": 0.05,
+      "max_depth": 6,
+      "n_estimators": 300,
+      "reg_alpha": 0.0,
+      "reg_lambda": 1.0,
+      "subsample": 0.9
+    }
+  },
+  "random_seed": 42,
+  "reference_deviation_column": "reference_deviation",
+  "selection_metric": "rmse",
+  "split_column": "split",
+  "target_column": "harmony_index"
+}

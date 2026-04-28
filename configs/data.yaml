@@ -1,9 +1,99 @@
 {
   "dataset": {
     "raw_input_dir": "data/raw",
+    "manifest_csv_path": "data/interim/dataset_manifest.csv",
     "interim_manifest_path": "data/interim/dataset_manifest.parquet",
-    "processed_dataset_path": "data/processed/facial_aesthetics.parquet",
-    "features_table_path": "data/features/features.parquet"
+    "processed_dataset_path": "data/processed/facial_morphometrics.parquet",
+    "features_table_path": "data/features/morphometric_features.parquet",
+    "summary_path": "reports/metrics/dataset_manifest_summary.json",
+    "default_reference_model": "default_morphometric_reference",
+    "adapter_order": [
+      "fairface",
+      "utkface",
+      "chicago_face_database",
+      "scut_compat",
+      "generic_image_folder"
+    ],
+    "ignore_names": [
+      ".gitkeep",
+      ".DS_Store",
+      "Thumbs.db",
+      "__MACOSX",
+      ".ipynb_checkpoints"
+    ],
+    "adapters": {
+      "fairface": {
+        "enabled": true,
+        "dataset_name": "fairface",
+        "root_name_patterns": [
+          "fairface",
+          "fairface*"
+        ],
+        "label_globs": [
+          "**/train_labels.csv",
+          "**/val_labels.csv",
+          "**/fairface_label*.csv",
+          "**/*fairface*label*.csv"
+        ]
+      },
+      "utkface": {
+        "enabled": true,
+        "dataset_name": "utkface",
+        "root_name_patterns": [
+          "utkface",
+          "utkface*"
+        ]
+      },
+      "chicago_face_database": {
+        "enabled": true,
+        "dataset_name": "chicago_face_database",
+        "root_name_patterns": [
+          "cfd",
+          "cfd*",
+          "chicago*face*database*"
+        ],
+        "metadata_globs": [
+          "**/*.csv",
+          "**/*.tsv",
+          "**/*.json"
+        ]
+      },
+      "scut_compat": {
+        "enabled": true,
+        "dataset_name": "scut_compat",
+        "root_name_patterns": [
+          "scut*"
+        ],
+        "metadata_globs": [
+          "**/*.csv",
+          "**/*.tsv",
+          "**/*.txt",
+          "**/*.json"
+        ]
+      },
+      "generic_image_folder": {
+        "enabled": true,
+        "dataset_name_map": {}
+      }
+    },
+    "split_aliases": {
+      "train": "train",
+      "training": "train",
+      "val": "val",
+      "valid": "val",
+      "validation": "val",
+      "dev": "val",
+      "test": "test",
+      "testing": "test"
+    },
+    "deterministic_split": {
+      "enabled": true,
+      "seed": "manifest_v1",
+      "default_train_fraction": 0.8,
+      "default_val_fraction": 0.1,
+      "default_test_fraction": 0.1,
+      "missing_test_from_train_fraction": 0.1
+    }
   },
   "io": {
     "parquet_engine": "pyarrow",
@@ -13,6 +103,7 @@
       ".png",
       ".bmp",
       ".webp"
-    ]
+    ],
+    "path_mode": "relative_to_project_root"
   }
 }

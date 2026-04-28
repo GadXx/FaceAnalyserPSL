@@ -1,0 +1,79 @@
+{
+  "allowed_reference_splits": [
+    "train"
+  ],
+  "artifacts": {
+    "config_snapshot_path": "models/reference/reference_model_config_snapshot.json",
+    "group_statistics_path": "models/reference/reference_group_statistics.parquet",
+    "reference_model_path": "models/reference/reference_model.joblib",
+    "summary_json_path": "reports/metrics/reference_model_summary.json"
+  },
+  "enabled": true,
+  "feature_prefixes": [
+    "ratio_",
+    "sym_",
+    "angle_"
+  ],
+  "group_by": [
+    [
+      "sex_group_normalized"
+    ],
+    [
+      "age_group_normalized"
+    ],
+    [
+      "ethnicity_group_normalized"
+    ],
+    [
+      "sex_group_normalized",
+      "age_group_normalized"
+    ],
+    [
+      "sex_group_normalized",
+      "ethnicity_group_normalized"
+    ],
+    [
+      "age_group_normalized",
+      "ethnicity_group_normalized"
+    ],
+    [
+      "sex_group_normalized",
+      "age_group_normalized",
+      "ethnicity_group_normalized"
+    ]
+  ],
+  "group_label_aliases": {
+    "age_group_normalized": [
+      "age_group_normalized",
+      "age_group",
+      "age_bucket"
+    ],
+    "ethnicity_group_normalized": [
+      "ethnicity_group_normalized",
+      "ethnicity_group",
+      "race_group",
+      "race"
+    ],
+    "sex_group_normalized": [
+      "sex_group_normalized",
+      "gender_group_normalized",
+      "gender_presentation",
+      "sex",
+      "gender"
+    ]
+  },
+  "group_manifest_path": "data/processed/preprocessed_manifest.parquet",
+  "image_id_column": "image_id",
+  "input_features_path": "data/features/geometry_features.parquet",
+  "minimum_complete_case_count": 10,
+  "minimum_group_sample_count": 25,
+  "normalized_labels_column": "normalized_labels",
+  "percentiles": [
+    0.05,
+    0.25,
+    0.5,
+    0.75,
+    0.95
+  ],
+  "split_column": "split"
+}

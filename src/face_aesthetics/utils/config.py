@@ -8,10 +8,13 @@ from typing import Any
 DEFAULT_CONFIG_FILES = (
     "base.yaml",
     "data.yaml",
+    "features.yaml",
     "preprocess.yaml",
     "train_baseline.yaml",
+    "train_geometry.yaml",
     "train_fusion.yaml",
     "infer.yaml",
+    "robustness.yaml",
 )
 
 

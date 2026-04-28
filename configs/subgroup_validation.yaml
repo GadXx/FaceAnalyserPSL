@@ -1,0 +1,43 @@
+{
+  "subgroup_validation": {
+    "preprocessed_manifest_path": "data/processed/preprocessed_manifest.parquet",
+    "geometry_features_path": "data/features/geometry_features.parquet",
+    "reference_statistics_path": "models/reference/reference_group_statistics.parquet",
+    "reference_model_path": "models/reference/reference_model.joblib",
+    "output_validation_json_path": "reports/metrics/subgroup_validation.json",
+    "output_reference_coverage_json_path": "reports/metrics/reference_group_coverage.json",
+    "output_flat_table_path": "reports/metrics/subgroup_coverage.parquet",
+    "image_id_column": "image_id",
+    "subject_id_column": "subject_id",
+    "dataset_name_column": "dataset_name",
+    "normalized_labels_column": "normalized_labels",
+    "quality_pass_column": "quality_pass",
+    "processing_status_column": "processing_status",
+    "quality_gate_status_column": "quality_gate_status",
+    "quality_fail_reason_column": "quality_fail_reason",
+    "group_label_aliases": {
+      "sex_group_normalized": [
+        "sex_group_normalized",
+        "gender_presentation"
+      ],
+      "age_group_normalized": [
+        "age_group_normalized",
+        "age_group"
+      ],
+      "ethnicity_group_normalized": [
+        "ethnicity_group_normalized",
+        "ethnicity_group"
+      ]
+    },
+    "weak_support_thresholds": {
+      "min_rows": 25,
+      "min_unique_subjects": 10,
+      "min_preprocessing_success_rate": 0.6,
+      "min_feature_coverage_rate": 0.6,
+      "min_mean_feature_completeness_rate": 0.95,
+      "min_reference_sample_count": 50,
+      "min_reference_complete_case_count": 25
+    },
+    "top_k_incomplete_features": 10
+  }
+}

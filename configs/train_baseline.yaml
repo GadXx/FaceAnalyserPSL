@@ -1,10 +1,50 @@
 {
   "train_baseline": {
-    "enabled": false,
-    "feature_table_path": "data/features/baseline_features.parquet",
-    "target_column": "score",
-    "model_family": "xgboost",
-    "validation_split": 0.2,
-    "random_seed": 42
+    "enabled": true,
+    "input_features_path": "data/features/geometry_features.parquet",
+    "group_manifest_path": "data/processed/preprocessed_manifest.parquet",
+    "image_id_column": "image_id",
+    "split_column": "split",
+    "normalized_labels_column": "normalized_labels",
+    "feature_prefixes": ["ratio_", "sym_", "angle_"],
+    "group_label_aliases": {
+      "sex_group_normalized": [
+        "sex_group_normalized",
+        "gender_group_normalized",
+        "gender_presentation",
+        "sex",
+        "gender"
+      ],
+      "age_group_normalized": [
+        "age_group_normalized",
+        "age_group",
+        "age_bucket"
+      ],
+      "ethnicity_group_normalized": [
+        "ethnicity_group_normalized",
+        "ethnicity_group",
+        "race_group",
+        "race"
+      ]
+    },
+    "group_by": [
+      ["sex_group_normalized"],
+      ["age_group_normalized"],
+      ["ethnicity_group_normalized"],
+      ["sex_group_normalized", "age_group_normalized"],
+      ["sex_group_normalized", "ethnicity_group_normalized"],
+      ["age_group_normalized", "ethnicity_group_normalized"],
+      ["sex_group_normalized", "age_group_normalized", "ethnicity_group_normalized"]
+    ],
+    "allowed_reference_splits": ["train"],
+    "minimum_group_sample_count": 25,
+    "minimum_complete_case_count": 10,
+    "percentiles": [0.05, 0.25, 0.5, 0.75, 0.95],
+    "artifacts": {
+      "summary_json_path": "reports/metrics/reference_model_summary.json",
+      "group_statistics_path": "models/reference/reference_group_statistics.parquet",
+      "reference_model_path": "models/reference/reference_model.joblib",
+      "config_snapshot_path": "models/reference/reference_model_config_snapshot.json"
+    }
   }
 }
