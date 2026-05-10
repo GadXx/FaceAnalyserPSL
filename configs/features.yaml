@@ -1,0 +1,33 @@
+{
+  "features": {
+    "input_manifest_path": "data/processed/preprocessed_manifest.parquet",
+    "measurements_raw_path": "data/features/measurements_raw.parquet",
+    "measurements_normalized_path": "data/features/measurements_normalized.parquet",
+    "symmetry_features_path": "data/features/symmetry_features.parquet",
+    "geometry_features_path": "data/features/geometry_features.parquet",
+    "geometry_3d_features_path": "data/features/geometry_3d_features.parquet",
+    "summary_path": "reports/metrics/feature_extraction_summary.json",
+    "feature_registry_path": "reports/metrics/feature_registry.json",
+    "feature_audit_path": "reports/metrics/feature_audit.json",
+    "image_key_column": "image_id",
+    "quality_pass_column": "quality_pass",
+    "processing_status_column": "processing_status",
+    "required_processing_status": "processed",
+    "default_reference_model": "default_morphometric_reference",
+    "three_d": {
+      "enabled": true,
+      "input_artifacts_manifest_path": "data/processed/3d_artifacts/manifest.parquet"
+    },
+    "auxiliary_embeddings": {
+      "enabled": true,
+      "output_path": "data/features/deep_embeddings.parquet",
+      "encoder_name": "arcface_w600k_r50",
+      "encoder_model_path": "data/interim/insightface_models/models/buffalo_l/w600k_r50.onnx",
+      "embedding_dim": 512,
+      "providers": [
+        "CPUExecutionProvider"
+      ],
+      "ctx_id": -1
+    }
+  }
+}

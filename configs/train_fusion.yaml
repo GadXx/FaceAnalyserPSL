@@ -3,7 +3,7 @@
     "enabled": false,
     "tabular_features_path": "data/features/tabular_features.parquet",
     "embedding_features_path": "data/features/embedding_features.parquet",
-    "target_column": "score",
+    "target_column": "harmony_index",
     "model_family": "lightgbm",
     "validation_split": 0.2,
     "random_seed": 42

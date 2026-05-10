@@ -1,8 +1,10 @@
 {
   "project": {
-    "name": "face-aesthetics-scoring",
+    "name": "face-morphometric-analysis",
     "package_name": "src.face_aesthetics",
-    "environment": "local"
+    "environment": "local",
+    "domain": "objective_morphometric_analysis",
+    "compatibility_package_note": "Legacy package path retained for working imports."
   },
   "runtime": {
     "random_seed": 42,

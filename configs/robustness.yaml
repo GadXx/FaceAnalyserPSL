@@ -1,0 +1,28 @@
+{
+  "robustness": {
+    "output_summary_path": "reports/metrics/robustness_summary.json",
+    "output_feature_table_path": "reports/metrics/robustness_feature_deltas.parquet",
+    "work_dir": "reports/robustness_eval",
+    "preferred_execution_provider": "CPUExecutionProvider",
+    "fallback_execution_provider": "CPUExecutionProvider",
+    "device_id": 0,
+    "strict_gpu_mode": false,
+    "top_k_unstable_features": 10,
+    "perturbations": {
+      "crop_shift_x": 0.04,
+      "crop_shift_y": 0.04,
+      "resize_scale": 0.9,
+      "jpeg_quality": 60,
+      "blur_kernel_size": 3,
+      "brightness_delta": 18.0,
+      "rotation_deg": 4.0
+    },
+    "tolerances": {
+      "raw_measurements": 5.0,
+      "normalized_ratios": 0.08,
+      "symmetry_metrics": 0.08,
+      "angle_metrics": 4.0,
+      "optional_composite_indices": 0.08
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "artifacts": {
+    "comparison_report_path": "reports/metrics/geometry_vs_deep_baseline.json",
+    "config_snapshot_path": "models/geometry/geometry_baseline_config_snapshot.json",
+    "feature_importance_path": "reports/metrics/geometry_baseline_feature_importance.csv",
+    "metrics_json_path": "reports/metrics/geometry_baseline_metrics.json",
+    "models_dir": "models/geometry",
+    "test_predictions_path": "reports/metrics/geometry_baseline_test_predictions.csv",
+    "val_predictions_path": "reports/metrics/geometry_baseline_val_predictions.csv"
+  },
+  "deep_baseline_metrics_path": "reports/metrics/deep_baseline_metrics.json",
+  "derived_split": {
+    "test_size": 0.15,
+    "train_size": 0.7,
+    "val_size": 0.15
+  },
+  "enabled": true,
+  "feature_prefixes": [
+    "geom_",
+    "pose_",
+    "quality_"
+  ],
+  "image_id_column": "image_id",
+  "input_features_path": "data/features/geometry_features.parquet",
+  "models": {
+    "ridge": {
+      "alpha": 1.0,
+      "artifact_path": "models/geometry/ridge_regressor.joblib",
+      "enabled": true
+    },
+    "xgboost": {
+      "artifact_path": "models/geometry/xgboost_regressor.joblib",
+      "colsample_bytree": 0.8,
+      "enabled": true,
+      "learning_rate": 0.05,
+      "max_depth": 4,
+      "n_estimators": 300,
+      "reg_alpha": 0.0,
+      "reg_lambda": 1.0,
+      "subsample": 0.9
+    }
+  },
+  "random_seed": 42,
+  "selection_metric": "rmse",
+  "split_column": "split",
+  "target_column": "harmony_index"
+}

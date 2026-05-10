@@ -1,9 +1,35 @@
 {
   "infer": {
-    "enabled": false,
-    "input_dir": "data/raw",
-    "output_path": "reports/inference_predictions.csv",
-    "batch_size": 16,
-    "device": "cpu"
+    "enabled": true,
+    "output_dir": "reports/examples",
+    "reference_model_path": "models/reference/reference_model.joblib",
+    "reference_statistics_path": "models/reference/reference_group_statistics.parquet",
+    "reporting_summary_path": "reports/metrics/reporting_summary.json",
+    "top_k_features": 5,
+    "api": {
+      "cors_allowed_origins": [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173"
+      ]
+    },
+    "upload": {
+      "enabled": true,
+      "temp_dir": "data/interim/runtime_uploads",
+      "max_file_size_mb": 15,
+      "allowed_extensions": [
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".webp",
+        ".bmp"
+      ],
+      "allowed_content_types": [
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/bmp",
+        "application/octet-stream"
+      ]
+    }
   }
 }
