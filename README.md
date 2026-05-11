@@ -1,25 +1,25 @@
 # FaceAnalyserPSL
 
-Локальный ML/CV-пайплайн для **objective morphometric face analysis**.
+Локальный ML/CV-пайплайн для **objective morphometric face analysis** и
+отдельного **experimental learned scorer**.
 Legacy-имя репозитория `FaceAnalyserPSL` и пакет `src.face_aesthetics`
-сохранены только для обратной совместимости импортов и entry points.
+сохранены для обратной совместимости импортов и entry points.
 
-Проект **не** предназначен для beauty / attractiveness / PSL / appeal scoring.
-Активные пайплайны вычисляют только:
-- 2D facial measurements
-- normalized morphometric ratios
-- symmetry and angle metrics
-- reference-based z-score / Mahalanobis / percentile comparisons
-- optional template-based 3D geometry features
+Проект имеет две независимые части:
+- objective morphometric pipeline (измерения, ratios, symmetry, angles, optional 3D)
+- experimental scorer layer (subjective score, обучаемый по labeled dataset)
 
 ## Scope
 
-Система возвращает только objective morphometric outputs и технические
-метаданные качества. Никакие active code paths не должны вводить:
-- `beauty_score`
-- `attractiveness_score`
-- `psl_score`
-- `appeal_score`
+Objective часть возвращает только морфометрические признаки и метаданные качества.
+Experimental scorer не смешивается с objective report и возвращается отдельным блоком API/UI.
+
+Scorer policy:
+- primary score = continuous regression prediction
+- nearest group = только справочная привязка к обучающим папкам
+- classifier/pairwise/ordinal = auxiliary diagnostics
+- confidence + warnings обязательны для интерпретации
+- scorer geometry-only by default (без raw image pixels и metadata leakage)
 
 ## Supported Datasets
 
@@ -33,6 +33,12 @@ Legacy-имя репозитория `FaceAnalyserPSL` и пакет `src.face_a
 Manifest собирается в unified schema и сохраняется в:
 - `data/interim/dataset_manifest.parquet`
 - `data/interim/dataset_manifest.csv`
+
+Reference layer for scorer:
+- `FairFace` и `UTKFace` используются как population/reference baseline
+- beauty-labeled dataset (папки `1..9.5`) используется только как target for scoring
+- reference-relative features (`ref_z_*`, `ref_dir_*`, `ref_ratio_*`, `ref_absdev_*`, `ref_percentile_*`)
+  считаются по reference stats, не по beauty dataset
 
 ## Expected Folder Structure
 
@@ -88,6 +94,30 @@ python -m venv .venv
 python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
+
+Optional MediaPipe backend for dense landmarks:
+
+```bash
+python -m pip install -r requirements-mediapipe.txt
+```
+
+Если `mediapipe` недоступен в текущем окружении, pipeline не падает:
+- InsightFace-only extraction продолжает работать
+- `reports/metrics/landmark_capability_report.json` фиксирует `mediapipe_available=false`
+- `mediapipe_unavailable_reason` содержит причину import/runtime failure
+
+Для `FaceLandmarker` также нужен model asset:
+- `data/interim/mediapipe/face_landmarker.task`
+
+MediaPipe delegate policy:
+- `delegate=cpu|gpu|auto`
+- `fallback_to_cpu=true|false`
+- diagnostics пишутся в `reports/metrics/mediapipe_runtime_diagnostics.json`
+
+Важно:
+- `InsightFace` ускоряется через `ONNXRuntime CUDAExecutionProvider`
+- `MediaPipe` ускоряется через свой `GPU delegate`, а не через CUDAExecutionProvider
+- если в системе renderer показывает `llvmpipe`, то фактически используется software/OpenGL fallback, а не реальный GPU
 
 Быстрый smoke-check импортов и конфигов:
 
@@ -228,6 +258,18 @@ Feature extraction использует только eligible preprocessing rows
 - распределение по статусам
 - compatibility aliases и явные дубликаты
 - признаки, пока оставленные как `unstable`
+
+Multi-source landmark capability artifacts:
+- `reports/metrics/landmark_capability_report.json`
+- optional `reports/debug/mediapipe_landmarks.json`
+- optional `reports/debug/mediapipe_landmarks_indices.png`
+- optional `reports/debug/mediapipe_landmark_regions.json`
+
+MediaPipe path остаётся optional:
+- при наличии dependency может вернуть dense `468/478` landmarks
+- добавляет отдельные `mediapipe_*` geometry features
+- не заменяет InsightFace anchors, а расширяет feature space
+- scorer по умолчанию не использует proxy/raw MediaPipe features без reliability audit
 
 Текущий расширенный 2D feature space включает:
 - vertical proportions / thirds proxies
@@ -493,6 +535,214 @@ Outputs:
   3D reconstruction.
 - Single-image inference path currently remains 2D-oriented; optional 3D branch
   протестирован на preprocessing + feature extraction path.
+
+## Experimental Scoring Layer
+
+В репозитории есть отдельный experimental scorer, который не вмешивается в
+objective reference model. Он обучается на dataset tree, где имя папки
+является score label, например:
+
+- `dataset/5/`
+- `dataset/5.5/`
+- `dataset/7/`
+- `dataset/8.5/`
+
+Что важно:
+
+- scorer учится на размеченных примерах и не предполагает, что каждая
+  отдельная метрика имеет универсальное "идеальное" значение.
+- Высокий score может получаться из разных комбинаций сильных и средних
+  признаков; модель учит эти сочетания статистически по dataset, а не по
+  вручную заданной таблице идеалов.
+- В strict-scale режиме `5` трактуется как ordinary / mass baseline zone,
+  `9.5` как elite anchor уровня top-tier examples, `10` как почти
+  недостижимая theoretical upper bound, а `0` как reserved invalid / severe
+  anomaly bound.
+- `predicted_score` является continuous output primary supervised regression
+  model и не должен подменяться ближайшей обучающей группой.
+- `display_score` это только UI-округление continuous `predicted_score`,
+  например:
+  - `8.6079 -> 8.61`
+- Сам `predicted_score` может быть непрерывным:
+  - `7.32`
+  - `7.86`
+  - `9.02`
+- Пользовательская semantic шкала scorer остаётся `0..10`, даже если в текущем
+  dataset отсутствуют крайние labels `0` и `10`.
+- При этом модель обучается только на реально наблюдаемых labels, а report
+  отдельно хранит `observed_training_label_range`, чтобы не маскировать
+  отсутствие support у крайних значений.
+- На текущем dataset labels покрывают промежуточный диапазон вроде `1..9.5`;
+  это не ошибка, но крайние области `0..1` и `9.5..10` поддерживаются хуже.
+- `nearest_score_group` это ближайшая обучающая группа, а не сама оценка.
+  Она используется только как справочная привязка к папкам датасета.
+- `predicted_group` из classification baseline теперь выводится отдельно от
+  regression блока и не должен интерпретироваться как замена
+  `nearest_score_group`.
+- scorer не обучается по raw image pixels напрямую: фото используется только
+  для извлечения morphometric metrics, а модели получают только tabular
+  geometry-derived features.
+- Этот слой субъективный/экспериментальный и должен использоваться отдельно от
+  baseline morphometric report.
+- По умолчанию scorer обучается только на `quality_pass=true` строках.
+- По умолчанию из scorer training исключены raw pixel features (`raw_*`,
+  `*_px`), чтобы уменьшить crop-scale bias и leakage от абсолютного масштаба.
+- По умолчанию scorer работает в режиме `geometry_only`: используются только
+  normalized ratios, symmetry metrics, angle metrics и pose-related geometry
+  features. Metadata, file paths и embeddings не попадают в train.
+- Model selection теперь идёт через cross-validation, а не через один
+  validation split.
+- Scoring manifest теперь делится на `train / val / test`.
+- Pairwise ranking строится только после image-level split:
+  - train pairs только из train images
+  - validation/test metrics считаются на val/test images без пересечения с
+    train images
+- Final score нужно интерпретировать вместе с `confidence`; low-confidence
+  output не должен считаться надёжным.
+- Primary score теперь отдаётся из лучшей learned regression model.
+- Primary model selection теперь дополнительно штрафует regression-to-mean:
+  учитываются low/high group bias, elite-group underprediction, group macro MAE
+  и calibration slope, а не только global MAE.
+- `raw_predicted_score` и `calibrated_predicted_score` хранятся отдельно.
+  Calibration fit делается только на validation predictions и не использует
+  test split для обучения.
+- Pairwise ranking, ordinal scorer, classifier baseline и ensemble остаются
+  auxiliary diagnostics и confidence signals. Они не подменяют primary score,
+  если не подтверждают качество на holdout.
+- Pairwise ranking особенно полезен для маленького субъективного dataset tree:
+  он учится сравнивать пары по относительному порядку score bins, а не только
+  регрессировать абсолютное значение.
+- Local explanations и component contributions показывают, какие признаки и
+  зоны лица сдвинули learned score вверх или вниз относительно baseline модели.
+  Это объяснение learned model, а не объективная истина о "качестве" частей
+  лица.
+
+Подготовка scoring manifest:
+
+```bash
+.venv/bin/python scripts/prepare_scoring_dataset.py --dataset-root ./dataset
+```
+
+Feature extraction для scoring dataset:
+
+```bash
+.venv/bin/python scripts/extract_scoring_features.py
+```
+
+Обучение continuous scorer:
+
+```bash
+.venv/bin/python scripts/train_scorer.py
+```
+
+Single-image scorer inference:
+
+```bash
+.venv/bin/python scripts/run_scorer.py --image-path path/to/photo.jpg
+```
+
+Single-image scorer explanation:
+
+```bash
+.venv/bin/python scripts/explain_scorer.py --image-path path/to/photo.jpg
+```
+
+API scorer upload endpoint:
+
+```bash
+POST /score-upload
+```
+
+The web UI calls this endpoint after the main objective analysis upload. The
+scoring result is shown in a separate "Experimental Learned Score" section and
+does not replace the objective morphometric report.
+
+The objective analysis response also includes an explicit `expanded_geometry`
+section (MediaPipe-derived groups: face oval, eyes, brows, nose, mouth/lips,
+cheekbones/midface, jaw/chin) with `source` and `reliability` tags
+(`reliable`/`proxy`/`unstable`) for each feature.
+
+The UI scorer section now shows:
+
+- primary score from the learned regression model
+- confidence and warning reasons
+- local explanation with top positive / negative feature contributions
+- global learned feature/component weights (dataset-learned importance)
+- component contributions by facial region / feature family
+- auxiliary diagnostics for pairwise, ordinal, classifier, and ensemble models
+
+Important:
+
+- component contributions are learned explanations, not objective sub-scores
+- global weights and local contributions are different concepts:
+  global weight = model-wide importance, local contribution = per-image score shift
+- classifier predicted group is diagnostic only and is not shown as the primary score
+- low-confidence results should not be interpreted as reliable
+
+Основные scoring artifacts:
+
+- `data/scoring/scoring_manifest.parquet`
+- `data/scoring/scoring_features.parquet`
+- `data/scoring/scoring_pairs.parquet`
+- `models/scoring/scorer_regressor.joblib`
+- `models/scoring/scorer_classifier.joblib`
+- `models/scoring/pairwise_ranker.joblib`
+- `models/scoring/ordinal_scorer.joblib`
+- `reports/metrics/scorer_training_summary.json`
+- `reports/metrics/scorer_cv_results.json`
+- `reports/metrics/scorer_model_selection.json`
+- `reports/metrics/scorer_selected_features.json`
+- `reports/metrics/scoring_pairwise_summary.json`
+- `reports/metrics/pairwise_ranker_summary.json`
+- `reports/metrics/ordinal_scorer_summary.json`
+- `reports/metrics/scorer_ensemble_summary.json`
+- `reports/metrics/scorer_feature_importance.json`
+- `reports/metrics/scorer_feature_correlations.json`
+- `reports/metrics/scorer_global_feature_importance.json`
+- `reports/metrics/scorer_component_importance.json`
+- `reports/metrics/scorer_feature_effects.json`
+- `reports/metrics/scorer_group_confusion.json`
+- `reports/metrics/scorer_groupwise_errors.json`
+- `reports/metrics/scorer_calibration_by_group.json`
+- `reports/metrics/scorer_extreme_bias_summary.json`
+- `reports/metrics/scorer_prediction_examples_by_group.json`
+- `reports/metrics/scoring_quality_failures.json`
+- `reports/metrics/expanded_geometry_scorer_comparison.json`
+- `reports/metrics/scorer_weighted_model_comparison.json`
+- `reports/metrics/scorer_learned_feature_weights.json`
+- `reports/metrics/scorer_learned_component_weights.json`
+- `reports/metrics/scorer_component_weight_summary.json`
+- `reports/metrics/scorer_component_balanced_feature_selection.json`
+- `reports/examples/scorer_report.json`
+- `reports/examples/scorer_report.md`
+
+Ограничения scoring dataset:
+
+- scorer не создаёт synthetic labels между папками; промежуточные значения
+  появляются только как output regression model;
+- extrapolation вне observed score range не гарантируется;
+- в текущем dataset могут отсутствовать `0` и `10`; пользовательская шкала при
+  этом всё равно остаётся `0..10`, но predictions near unsupported extremes
+  должны интерпретироваться как lower-confidence;
+- если dataset сейчас покрывает, например, только `1..9.5`, то предсказания
+  около `0..1` и `9.5..10` должны интерпретироваться как low-confidence;
+- если score group имеет мало samples, training summary явно помечает её как
+  weak-support group;
+- quality-failed images сохраняются в scoring features со status, но по
+  умолчанию не используются в train.
+- pairwise / ordinal / ensemble метрики без независимого image-level holdout
+  могут быть завышены; поэтому текущая схема использует отдельный test split.
+- web UI показывает score отдельно от objective analysis и явно помечает его
+  как experimental subjective layer.
+- качество score сильно зависит от размера, чистоты и согласованности dataset
+  tree; маленькие и дисбалансные группы быстро снижают надёжность.
+- при маленьком dataset tree regression и classification могут расходиться; это
+  отражается в `confidence.reasons` и warning-блоке scorer report.
+- component contributions и feature effects dataset-dependent: они отражают
+  learned relationships в текущем scorer, а не causal truth и не objective
+  morphometric norm.
+- если хочешь улучшить scorer quality, сначала увеличивай число изображений на
+  группу и выравнивай support по score bins, а не только меняй модель.
 
 ## Runbook
 

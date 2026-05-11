@@ -9,6 +9,9 @@
     "summary_path": "reports/metrics/feature_extraction_summary.json",
     "feature_registry_path": "reports/metrics/feature_registry.json",
     "feature_audit_path": "reports/metrics/feature_audit.json",
+    "expanded_feature_summary_path": "reports/metrics/expanded_feature_summary.json",
+    "feature_missingness_path": "reports/metrics/feature_missingness.json",
+    "feature_reliability_audit_path": "reports/metrics/feature_reliability_audit.json",
     "image_key_column": "image_id",
     "quality_pass_column": "quality_pass",
     "processing_status_column": "processing_status",
@@ -19,10 +22,10 @@
       "input_artifacts_manifest_path": "data/processed/3d_artifacts/manifest.parquet"
     },
     "auxiliary_embeddings": {
-      "enabled": true,
+      "enabled": false,
       "output_path": "data/features/deep_embeddings.parquet",
-      "encoder_name": "arcface_w600k_r50",
-      "encoder_model_path": "data/interim/insightface_models/models/buffalo_l/w600k_r50.onnx",
+      "encoder_name": "disabled_mediapipe_only_mode",
+      "encoder_model_path": "",
       "embedding_dim": 512,
       "providers": [
         "CPUExecutionProvider"

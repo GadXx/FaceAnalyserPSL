@@ -4,9 +4,10 @@ import type {
   ApiErrorPayload,
   HealthResponse,
   ReferenceGroupsResponse,
+  ScoreResponse,
 } from "../types/api";
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
 
 async function parseJsonResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -30,11 +31,11 @@ async function parseJsonResponse<T>(response: Response): Promise<T> {
 }
 
 export async function getHealth(): Promise<HealthResponse> {
-  return parseJsonResponse<HealthResponse>(await fetch(`${API_BASE_URL}/health`));
+  return parseJsonResponse<HealthResponse>(await fetch(`/health`));
 }
 
 export async function getReferenceGroups(): Promise<ReferenceGroupsResponse> {
-  return parseJsonResponse<ReferenceGroupsResponse>(await fetch(`${API_BASE_URL}/reference-groups`));
+  return parseJsonResponse<ReferenceGroupsResponse>(await fetch(`/reference-groups`));
 }
 
 export async function analyzeUpload(file: File, options: AnalyzeRequestOptions): Promise<AnalyzeResponse> {
@@ -56,7 +57,18 @@ export async function analyzeUpload(file: File, options: AnalyzeRequestOptions):
     formData.append("strict_gpu", String(options.strictGpu));
   }
   return parseJsonResponse<AnalyzeResponse>(
-    await fetch(`${API_BASE_URL}/analyze-upload`, {
+    await fetch(`/analyze-upload`, {
+      method: "POST",
+      body: formData,
+    }),
+  );
+}
+
+export async function scoreUpload(file: File): Promise<ScoreResponse> {
+  const formData = new FormData();
+  formData.append("file", file);
+  return parseJsonResponse<ScoreResponse>(
+    await fetch(`/score-upload`, {
       method: "POST",
       body: formData,
     }),
@@ -67,7 +79,7 @@ export function buildArtifactFileUrl(path: string | null | undefined): string | 
   if (!path) {
     return null;
   }
-  return `${API_BASE_URL}/artifact-file?path=${encodeURIComponent(path)}`;
+  return `/artifact-file?path=${encodeURIComponent(path)}`;
 }
 
 export { API_BASE_URL };

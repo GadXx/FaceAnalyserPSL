@@ -688,6 +688,44 @@ select {
   opacity: 0.9;
 }
 
+.overlay-point--mediapipe {
+  fill: #0e7f86;
+  stroke: #ecfffd;
+}
+
+.overlay-mediapipe-region {
+  fill: none;
+  stroke-width: 1.55;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  opacity: 0.88;
+}
+
+.overlay-mediapipe-region--face-oval {
+  stroke: #c16022;
+}
+
+.overlay-mediapipe-region--eyes {
+  stroke: #1c5fb1;
+}
+
+.overlay-mediapipe-region--brows {
+  stroke: #7352a8;
+}
+
+.overlay-mediapipe-region--nose {
+  stroke: #1e798a;
+}
+
+.overlay-mediapipe-region--mouth {
+  stroke: #b53f4d;
+}
+
+.overlay-mediapipe-region--cheekbones {
+  stroke: #4f6b94;
+  stroke-dasharray: 6 4;
+}
+
 .overlay-point--eyes {
   fill: #0f2430;
 }

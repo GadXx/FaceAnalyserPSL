@@ -1,8 +1,8 @@
 import { computed, ref } from "vue";
 import { defineStore } from "pinia";
 
-import { analyzeUpload, getHealth, getReferenceGroups } from "../api/client";
-import type { AnalyzeResponse, HealthResponse, ReferenceGroupEntry, ReferenceGroupsResponse } from "../types/api";
+import { analyzeUpload, getHealth, getReferenceGroups, scoreUpload } from "../api/client";
+import type { AnalyzeResponse, HealthResponse, ReferenceGroupEntry, ReferenceGroupsResponse, ScoreResponse } from "../types/api";
 
 const ACCEPTED_TYPES = ["image/jpeg", "image/png", "image/webp", "image/bmp"];
 const MAX_FILE_SIZE_BYTES = 15 * 1024 * 1024;
@@ -11,6 +11,7 @@ export const useAnalysisStore = defineStore("analysis", () => {
   const health = ref<HealthResponse | null>(null);
   const referenceGroups = ref<ReferenceGroupsResponse | null>(null);
   const analysisResult = ref<AnalyzeResponse | null>(null);
+  const scoreResult = ref<ScoreResponse | null>(null);
   const selectedFile = ref<File | null>(null);
   const previewUrl = ref<string | null>(null);
   const lastSuccessfulAnalysisAt = ref<number | null>(null);
@@ -18,6 +19,7 @@ export const useAnalysisStore = defineStore("analysis", () => {
   const isLoadingGroups = ref(false);
   const isAnalyzing = ref(false);
   const errorMessage = ref<string | null>(null);
+  const scoreErrorMessage = ref<string | null>(null);
   const selectedGroupKey = ref<string>("");
   const manualGroup = ref<string>("");
   const outputDir = ref<string>("");
@@ -79,6 +81,8 @@ export const useAnalysisStore = defineStore("analysis", () => {
 
   function clearSelectedFile(): void {
     selectedFile.value = null;
+    scoreResult.value = null;
+    scoreErrorMessage.value = null;
     if (previewUrl.value) {
       URL.revokeObjectURL(previewUrl.value);
     }
@@ -87,6 +91,7 @@ export const useAnalysisStore = defineStore("analysis", () => {
 
   function setSelectedFile(file: File | null): void {
     errorMessage.value = null;
+    scoreErrorMessage.value = null;
     if (!file) {
       clearSelectedFile();
       return;
@@ -117,6 +122,13 @@ export const useAnalysisStore = defineStore("analysis", () => {
         strictGpu: strictGpu.value,
       });
       lastSuccessfulAnalysisAt.value = Date.now();
+      try {
+        scoreResult.value = await scoreUpload(selectedFile.value);
+        scoreErrorMessage.value = null;
+      } catch (error) {
+        scoreResult.value = null;
+        scoreErrorMessage.value = error instanceof Error ? error.message : "Scoring request failed.";
+      }
     } catch (error) {
       errorMessage.value = error instanceof Error ? error.message : "Analysis request failed.";
       throw error;
@@ -129,6 +141,7 @@ export const useAnalysisStore = defineStore("analysis", () => {
     health,
     referenceGroups,
     analysisResult,
+    scoreResult,
     selectedFile,
     previewUrl,
     lastSuccessfulAnalysisAt,
@@ -136,6 +149,7 @@ export const useAnalysisStore = defineStore("analysis", () => {
     isLoadingGroups,
     isAnalyzing,
     errorMessage,
+    scoreErrorMessage,
     selectedGroupKey,
     manualGroup,
     outputDir,

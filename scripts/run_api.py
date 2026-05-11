@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from pathlib import Path
 import sys
 
@@ -10,6 +11,10 @@ import uvicorn
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
+
+# MediaPipe GPU/EGL initialization is unstable on some Linux API runtimes.
+# Force CPU delegate before importing the application stack.
+os.environ.setdefault("MEDIAPIPE_DISABLE_GPU", "1")
 
 from src.face_aesthetics.api.app import create_app
 

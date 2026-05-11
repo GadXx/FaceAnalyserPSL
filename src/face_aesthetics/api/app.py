@@ -13,7 +13,10 @@ from src.face_aesthetics.api.schemas import (
     ErrorResponse,
     HealthResponse,
     ReferenceGroupsResponse,
+    ScoreResponse,
 )
+from src.face_aesthetics.data.io import write_json
+from src.face_aesthetics.landmarks.mediapipe_source import get_mediapipe_runtime_startup_diagnostics
 from src.face_aesthetics.services.inference_service import (
     ServiceDependencyError,
     ServiceValidationError,
@@ -23,8 +26,11 @@ from src.face_aesthetics.services.inference_service import (
     health_status,
     list_reference_groups,
     persist_uploaded_image,
+    score_image,
+    serialize_scorer_artifacts,
     serialize_inference_artifacts,
 )
+from src.face_aesthetics.utils.config import load_named_configs
 
 
 def _multipart_runtime_available() -> bool:
@@ -51,15 +57,48 @@ def _parse_optional_int(value: str | None) -> int | None:
         raise ServiceValidationError(f"Invalid integer value: {value}") from exc
 
 
+def _reference_filters_from_form(form: Any) -> dict[str, str]:
+    filters: dict[str, str] = {}
+    for key in ("gender", "age_group", "race"):
+        value = form.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        if text:
+            filters[key] = text
+    return filters
+
+
 def create_app(*, project_root: Path | None = None) -> FastAPI:
     resolved_project_root = (project_root or Path.cwd()).resolve()
     runtime_settings = get_api_runtime_settings(project_root=resolved_project_root)
+    configs = load_named_configs(resolved_project_root / "configs")
+    mediapipe_config = dict(
+        configs.get("landmarks", {}).get("landmarks", {}).get("landmark_sources", {}).get("mediapipe_face_mesh", {})
+    )
     app = FastAPI(
         title="FaceAnalyserPSL Morphometric API",
         version="1.0.0",
         description="Objective morphometric face analysis API. No beauty or attractiveness scoring is produced.",
     )
     app.state.project_root = resolved_project_root
+    app.state.mediapipe_runtime = get_mediapipe_runtime_startup_diagnostics(
+        config=mediapipe_config,
+        project_root=resolved_project_root,
+    )
+    mediapipe_runtime_report_path = (
+        resolved_project_root / "reports/metrics/mediapipe_runtime_diagnostics.json"
+    ).resolve()
+    write_json(app.state.mediapipe_runtime, mediapipe_runtime_report_path)
+    print(
+        "mediapipe_runtime="
+        f"enabled={app.state.mediapipe_runtime.get('mediapipe_enabled')} "
+        f"available={app.state.mediapipe_runtime.get('mediapipe_available')} "
+        f"gpu_disabled={app.state.mediapipe_runtime.get('gpu_disabled')} "
+        f"requested_delegate={app.state.mediapipe_runtime.get('requested_delegate')} "
+        f"selected_delegate={app.state.mediapipe_runtime.get('selected_delegate')} "
+        f"landmark_count={app.state.mediapipe_runtime.get('landmark_count')}"
+    )
     cors_allowed_origins = list(runtime_settings["api"].get("cors_allowed_origins", []))
     if cors_allowed_origins:
         app.add_middleware(
@@ -209,6 +248,58 @@ def create_app(*, project_root: Path | None = None) -> FastAPI:
         except HTTPException:
             raise
         except Exception as exc:  # pragma: no cover - unexpected failures should surface clearly
+            raise HTTPException(status_code=500, detail={"detail": str(exc), "error_type": "internal_error"}) from exc
+
+    @app.post(
+        "/score-upload",
+        response_model=ScoreResponse,
+        responses={
+            422: {"model": ErrorResponse},
+            424: {"model": ErrorResponse},
+            500: {"model": ErrorResponse},
+        },
+    )
+    async def post_score_upload(request: Request) -> dict:
+        if not _multipart_runtime_available():
+            raise HTTPException(
+                status_code=424,
+                detail={
+                    "detail": "python-multipart is required for file upload support. Install dependencies from requirements.txt.",
+                    "error_type": "dependency_error",
+                },
+            )
+        try:
+            form = await request.form()
+            upload = form.get("file")
+            if upload is None:
+                raise ServiceValidationError("Multipart form field 'file' is required.")
+            if not hasattr(upload, "filename"):
+                raise ServiceValidationError("Multipart form field 'file' must be a file upload.")
+            file_bytes = await upload.read()
+            stored_image_path = persist_uploaded_image(
+                file_name=str(getattr(upload, "filename", "upload")),
+                content_type=getattr(upload, "content_type", None),
+                file_bytes=file_bytes,
+                project_root=app.state.project_root,
+            )
+            reference_filters = _reference_filters_from_form(form)
+            artifacts = score_image(
+                image_path=stored_image_path,
+                project_root=app.state.project_root,
+                reference_filters=reference_filters or None,
+            )
+            serialized = serialize_scorer_artifacts(artifacts)
+            serialized.setdefault("quality", {})
+            serialized["quality"]["upload_original_filename"] = getattr(upload, "filename", None)
+            serialized["quality"]["upload_content_type"] = getattr(upload, "content_type", None)
+            return serialized
+        except ServiceValidationError as exc:
+            raise HTTPException(status_code=422, detail={"detail": str(exc), "error_type": "validation_error"}) from exc
+        except ServiceDependencyError as exc:
+            raise HTTPException(status_code=424, detail={"detail": str(exc), "error_type": "dependency_error"}) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:  # pragma: no cover
             raise HTTPException(status_code=500, detail={"detail": str(exc), "error_type": "internal_error"}) from exc
 
     return app

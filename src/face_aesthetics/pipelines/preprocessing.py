@@ -20,11 +20,11 @@ from src.face_aesthetics.data.io import (
 from src.face_aesthetics.services.preprocessing import (
     AutoAlignmentOutcome,
     DetectedFace,
-    InsightFaceDetector,
+    MediaPipeDetector,
     compute_blur_variance,
-    run_gpu_runtime_check,
     select_detection_with_auto_alignment,
 )
+from src.face_aesthetics.landmarks.mediapipe_source import get_mediapipe_runtime_startup_diagnostics
 from src.face_aesthetics.services.three_d import (
     OptionalFace3DProcessor,
     ensure_default_canonical_face_template,
@@ -263,45 +263,28 @@ def _build_output_row(
     return row
 
 
-def _build_detector(preprocess_config: dict[str, Any], runtime_config: dict[str, Any], root: Path) -> InsightFaceDetector:
-    insightface_config = preprocess_config["insightface"]
-    preferred_provider = str(
-        runtime_config.get(
-            "preferred_execution_provider",
-            insightface_config.get("preferred_execution_provider", "CUDAExecutionProvider"),
-        )
-    )
-    fallback_provider = str(
-        runtime_config.get(
-            "fallback_execution_provider",
-            insightface_config.get("fallback_execution_provider", "CPUExecutionProvider"),
-        )
-    )
-    device_id = int(runtime_config.get("device_id", insightface_config.get("device_id", 0)))
-    selected_ctx_id = device_id if preferred_provider == "CUDAExecutionProvider" else -1
-
-    return InsightFaceDetector(
-        model_name=insightface_config["model_name"],
-        model_root=(root / insightface_config["model_root"]).resolve(),
-        providers=list(insightface_config.get("providers", [])),
-        ctx_id=selected_ctx_id,
-        det_size=list(insightface_config["det_size"]),
-        device_id=device_id,
-        preferred_execution_provider=preferred_provider,
-        fallback_execution_provider=fallback_provider,
-        strict_gpu_mode=bool(runtime_config.get("strict_gpu_mode", False)),
-        allowed_modules=list(insightface_config.get("allowed_modules", [])) or None,
-        required_model_files=list(insightface_config.get("required_model_files", [])),
-        fallback_detector_enabled=bool(insightface_config.get("fallback_detector", {}).get("enabled", False)),
-        fallback_detector_scale_factor=float(
-            insightface_config.get("fallback_detector", {}).get("scale_factor", 1.1)
-        ),
-        fallback_detector_min_neighbors=int(
-            insightface_config.get("fallback_detector", {}).get("min_neighbors", 3)
-        ),
-        fallback_detector_min_size=int(
-            insightface_config.get("fallback_detector", {}).get("min_size", 30)
-        ),
+def _build_detector(preprocess_config: dict[str, Any], runtime_config: dict[str, Any], root: Path) -> MediaPipeDetector:
+    landmarks_config = dict(preprocess_config.get("landmarks", {}))
+    mediapipe_config = dict(landmarks_config.get("mediapipe_face_mesh", {}))
+    if not mediapipe_config:
+        mediapipe_config = {
+            "enabled": True,
+            "optional": False,
+            "model": "face_landmarker",
+            "max_num_faces": 1,
+            "refine_landmarks": True,
+            "min_detection_confidence": 0.5,
+            "min_tracking_confidence": 0.5,
+            "model_asset_path": "data/interim/mediapipe/face_landmarker.task",
+            "delegate": runtime_config.get("mediapipe_delegate", "auto"),
+            "fallback_to_cpu": True,
+        }
+    if "delegate" not in mediapipe_config and runtime_config.get("mediapipe_delegate") is not None:
+        mediapipe_config["delegate"] = runtime_config["mediapipe_delegate"]
+    return MediaPipeDetector(
+        mediapipe_config=mediapipe_config,
+        project_root=root,
+        target_image_size=list(preprocess_config.get("target_image_size", [224, 224])),
     )
 
 
@@ -328,20 +311,13 @@ def _runtime_config(preprocess_config: dict[str, Any], overrides: dict[str, Any]
 
 
 def _resolve_runtime_check_model_path(preprocess_config: dict[str, Any], root: Path) -> Path:
-    insightface_config = preprocess_config["insightface"]
-    model_name = str(insightface_config["model_name"])
-    model_root = (root / insightface_config["model_root"]).resolve()
-    preferred_check_model = str(
-        preprocess_config.get("gpu_runtime_check", {}).get("test_model_file", "det_10g.onnx")
-    )
-    candidate_paths = [
-        model_root / "models" / model_name / preferred_check_model,
-        model_root / model_name / preferred_check_model,
-    ]
-    for candidate in candidate_paths:
-        if candidate.exists():
-            return candidate
-    return candidate_paths[0]
+    landmarks_config = dict(preprocess_config.get("landmarks", {}))
+    mediapipe_config = dict(landmarks_config.get("mediapipe_face_mesh", {}))
+    model_asset_path = str(mediapipe_config.get("model_asset_path", "data/interim/mediapipe/face_landmarker.task"))
+    path = Path(model_asset_path)
+    if not path.is_absolute():
+        path = (root / path).resolve()
+    return path
 
 
 def _runtime_check_output_path(preprocess_config: dict[str, Any], root: Path) -> Path:
@@ -381,13 +357,13 @@ def run_preprocessing_gpu_runtime_check(
     runtime_check_path = _runtime_check_output_path(preprocess_config, root)
     test_model_path = _resolve_runtime_check_model_path(preprocess_config, root)
 
-    payload = run_gpu_runtime_check(
-        test_model_path=test_model_path,
-        preferred_execution_provider=str(runtime_config["preferred_execution_provider"]),
-        fallback_execution_provider=str(runtime_config["fallback_execution_provider"]),
-        device_id=int(runtime_config["device_id"]),
-        strict_gpu_mode=bool(runtime_config.get("strict_gpu_mode", False)),
+    landmarks_config = dict(preprocess_config.get("landmarks", {}))
+    mediapipe_config = dict(landmarks_config.get("mediapipe_face_mesh", {}))
+    payload = get_mediapipe_runtime_startup_diagnostics(
+        config=mediapipe_config,
+        project_root=root,
     )
+    payload["test_model_path"] = str(test_model_path)
     payload["runtime"] = runtime_config
     write_json(payload, runtime_check_path)
     _ensure_strict_gpu_runtime_or_raise(payload, runtime_config)
@@ -607,13 +583,13 @@ def preprocess_single_image(
     default_reference_model = configs["data"]["dataset"].get("default_reference_model")
     test_model_path = _resolve_runtime_check_model_path(preprocess_config, root)
 
-    gpu_runtime = run_gpu_runtime_check(
-        test_model_path=test_model_path,
-        preferred_execution_provider=str(runtime_config["preferred_execution_provider"]),
-        fallback_execution_provider=str(runtime_config["fallback_execution_provider"]),
-        device_id=int(runtime_config["device_id"]),
-        strict_gpu_mode=bool(runtime_config.get("strict_gpu_mode", False)),
+    landmarks_config = dict(preprocess_config.get("landmarks", {}))
+    mediapipe_config = dict(landmarks_config.get("mediapipe_face_mesh", {}))
+    gpu_runtime = get_mediapipe_runtime_startup_diagnostics(
+        config=mediapipe_config,
+        project_root=root,
     )
+    gpu_runtime["test_model_path"] = str(test_model_path)
     gpu_runtime["runtime"] = runtime_config
     _ensure_strict_gpu_runtime_or_raise(gpu_runtime, runtime_config)
 
@@ -810,6 +786,7 @@ def run_preprocessing(
     three_d_summary_path = (root / preprocess_config.get("three_d_summary_path", "reports/metrics/preprocessing_3d_summary.json")).resolve()
     gpu_runtime_check_path = _runtime_check_output_path(preprocess_config, root)
     quality_gate = preprocess_config["quality_gate"]
+    auto_alignment_config = dict(preprocess_config.get("auto_alignment", {}))
     three_d_config = dict(preprocess_config.get("three_d", {}))
     three_d_manifest_path = (root / three_d_config.get("artifacts_manifest_path", "data/processed/3d_artifacts/manifest.parquet")).resolve()
     target_image_size = list(preprocess_config["target_image_size"])
@@ -824,13 +801,13 @@ def run_preprocessing(
     ensure_directory(three_d_artifacts_dir)
     ensure_directory(three_d_manifest_path)
     test_model_path = _resolve_runtime_check_model_path(preprocess_config, root)
-    gpu_runtime = run_gpu_runtime_check(
-        test_model_path=test_model_path,
-        preferred_execution_provider=str(runtime_config["preferred_execution_provider"]),
-        fallback_execution_provider=str(runtime_config["fallback_execution_provider"]),
-        device_id=int(runtime_config["device_id"]),
-        strict_gpu_mode=bool(runtime_config.get("strict_gpu_mode", False)),
+    landmarks_config = dict(preprocess_config.get("landmarks", {}))
+    mediapipe_config = dict(landmarks_config.get("mediapipe_face_mesh", {}))
+    gpu_runtime = get_mediapipe_runtime_startup_diagnostics(
+        config=mediapipe_config,
+        project_root=root,
     )
+    gpu_runtime["test_model_path"] = str(test_model_path)
     gpu_runtime["runtime"] = runtime_config
     write_json(gpu_runtime, gpu_runtime_check_path)
     _ensure_strict_gpu_runtime_or_raise(gpu_runtime, runtime_config)

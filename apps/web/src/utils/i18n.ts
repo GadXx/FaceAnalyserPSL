@@ -54,10 +54,13 @@ export interface Messages {
   normalizedRatiosTitle: string;
   symmetryMetricsTitle: string;
   angleMetricsTitle: string;
+  expandedGeometryTitle: string;
+  expandedGeometryDescription: string;
   geometryEyebrow: string;
   featuresEyebrow: string;
   referenceTitle: string;
   referenceEyebrow: string;
+  referencePartialTitle: string;
   deviationsTitle: string;
   deviationsEyebrow: string;
   deviationsDescription: string;
@@ -67,6 +70,53 @@ export interface Messages {
   limitationsEyebrow: string;
   artifactsTitle: string;
   artifactsEyebrow: string;
+  scoreTitle: string;
+  scoreEyebrow: string;
+  scoreDescription: string;
+  scoreLabel: string;
+  scoreModelLabel: string;
+  scoreFeatureSetLabel: string;
+  scoreActiveSourceLabel: string;
+  scoreMediapipeUsedLabel: string;
+  scoreDirectMediapipeUsedLabel: string;
+  scoreMediapipeDerivedRefUsedLabel: string;
+  scoreMediapipeDerivedOnlyNote: string;
+  scoreDiagnosticDisagreementTitle: string;
+  scoreMediapipeNotUsedPrimary: string;
+  scoreNearestGroupLabel: string;
+  scoreDistanceToGroupLabel: string;
+  scoreObservedRangeLabel: string;
+  scoreSourceLabel: string;
+  scoreRawValueLabel: string;
+  scoreCalibratedValueLabel: string;
+  scoreCalibratedDiagnosticNote: string;
+  scoreSelectedFeatureCount: string;
+  scoreReferenceUsedCount: string;
+  scoreNearestGroupDisclaimer: string;
+  scoreRangeLabel: string;
+  scorePrimaryCaption: string;
+  scoreUnavailableTitle: string;
+  scoreWarningsTitle: string;
+  scoreDiagnosticTitle: string;
+  scoreExplanationTitle: string;
+  scoreComponentsTitle: string;
+  scoreDiagnosticsCaption: string;
+  scoreExplanationUnavailable: string;
+  scoreExperimentalDisclaimer: string;
+  scoreWeightsTitle: string;
+  scoreWeightsDisclaimer: string;
+  scoreFeatureTypesTitle: string;
+  scoreFeatureSourcesTitle: string;
+  scoreDebugTitle: string;
+  scoreExplanationBaselineLabel: string;
+  scoreExplainedValueLabel: string;
+  scoreExplanationMethodLabel: string;
+  scoreUpwardContribution: string;
+  scoreDownwardContribution: string;
+  scoreModelContribution: string;
+  scoreConfidenceHigh: string;
+  scoreConfidenceMedium: string;
+  scoreConfidenceLow: string;
   emptyTitle: string;
   emptyEyebrow: string;
   emptyDescription: string;
@@ -149,10 +199,13 @@ export const messages: Record<Locale, Messages> = {
     normalizedRatiosTitle: "Normalized ratios",
     symmetryMetricsTitle: "Symmetry metrics",
     angleMetricsTitle: "Angle metrics",
+    expandedGeometryTitle: "Expanded face geometry",
+    expandedGeometryDescription: "MediaPipe-derived expanded morphometric signals with source and reliability tags (reliable/proxy/unstable).",
     geometryEyebrow: "Geometry",
     featuresEyebrow: "Features",
     referenceTitle: "Reference comparison",
     referenceEyebrow: "Reference model",
+    referencePartialTitle: "Partial reference comparison.",
     deviationsTitle: "Feature deviations",
     deviationsEyebrow: "Top contributors",
     deviationsDescription: "Largest per-feature standardized deviations from the selected reference group.",
@@ -162,6 +215,55 @@ export const messages: Record<Locale, Messages> = {
     limitationsEyebrow: "Interpretation",
     artifactsTitle: "Artifacts and generated files",
     artifactsEyebrow: "Outputs",
+    scoreTitle: "Experimental Learned Score",
+    scoreEyebrow: "Subjective layer",
+    scoreDescription: "Optional experimental score trained on the folder-labeled scoring dataset. This block is separate from the objective morphometric report.",
+    scoreLabel: "Predicted score",
+    scoreModelLabel: "Primary model",
+    scoreFeatureSetLabel: "Feature set",
+    scoreActiveSourceLabel: "Active metric source",
+    scoreMediapipeUsedLabel: "MediaPipe features used",
+    scoreDirectMediapipeUsedLabel: "Direct MediaPipe features used",
+    scoreMediapipeDerivedRefUsedLabel: "MediaPipe-derived reference features used",
+    scoreMediapipeDerivedOnlyNote: "Direct MediaPipe features are not used, but reference-relative features derived from MediaPipe metrics are active.",
+    scoreDiagnosticDisagreementTitle: "Diagnostic disagreement details",
+    scoreMediapipeNotUsedPrimary: "Expanded MediaPipe metrics are computed and shown, but the current primary scorer does not use them.",
+    scoreNearestGroupLabel: "Nearest training group",
+    scoreDistanceToGroupLabel: "Distance to nearest group",
+    scoreObservedRangeLabel: "Observed training labels",
+    scoreSourceLabel: "Primary score source",
+    scoreRawValueLabel: "Raw model score",
+    scoreCalibratedValueLabel: "Calibrated score",
+    scoreCalibratedDiagnosticNote: "Calibrated score is diagnostic and does not replace the primary score.",
+    scoreSelectedFeatureCount: "Selected features",
+    scoreReferenceUsedCount: "Reference-relative features used",
+    scoreNearestGroupDisclaimer: "The nearest training group is only a reference label from the dataset folders. It is not the score itself.",
+    scoreRangeLabel: "Score range",
+    scorePrimaryCaption: "The main score is produced by a learned regression model over morphometric features.",
+    scoreUnavailableTitle: "Experimental score unavailable.",
+    scoreWarningsTitle: "Scoring warnings",
+    scoreDiagnosticTitle: "Auxiliary diagnostics",
+    scoreExplanationTitle: "Local explanation",
+    scoreComponentsTitle: "Component contributions",
+    scoreDiagnosticsCaption: "These diagnostic models are secondary checks and do not replace the primary score.",
+    scoreExplanationUnavailable: "Local explanation is unavailable for this result.",
+    scoreExperimentalDisclaimer:
+      "This is an experimental learned attractiveness score. It is dataset-dependent, uses strict scale semantics, and is not objective truth. High scores represent rarer combinations of morphometric signals rather than universal proof of beauty.",
+    scoreWeightsTitle: "What influences the score most",
+    scoreWeightsDisclaimer:
+      "These weights are learned from the current beauty-labeled dataset (1-9.5). They represent model association strength, not causal or universal truth.",
+    scoreFeatureTypesTitle: "Feature representation types",
+    scoreFeatureSourcesTitle: "Feature sources",
+    scoreDebugTitle: "Scorer debug",
+    scoreExplanationBaselineLabel: "Technical model intercept (debug)",
+    scoreExplainedValueLabel: "Score explained by contributions",
+    scoreExplanationMethodLabel: "Explanation method",
+    scoreUpwardContribution: "pushed the learned score upward",
+    scoreDownwardContribution: "pushed the learned score downward",
+    scoreModelContribution: "model contribution",
+    scoreConfidenceHigh: "Confidence: High",
+    scoreConfidenceMedium: "Confidence: Medium",
+    scoreConfidenceLow: "Confidence: Low",
     emptyTitle: "Ready for first analysis",
     emptyEyebrow: "Empty state",
     emptyDescription: "Upload a face image, choose a reference group, and run the existing backend pipeline through the file-upload API.",
@@ -242,10 +344,13 @@ export const messages: Record<Locale, Messages> = {
     normalizedRatiosTitle: "Нормализованные отношения",
     symmetryMetricsTitle: "Метрики симметрии",
     angleMetricsTitle: "Угловые метрики",
+    expandedGeometryTitle: "Расширенная геометрия лица",
+    expandedGeometryDescription: "Расширенные морфометрические сигналы из MediaPipe с пометками source и reliability (reliable/proxy/unstable).",
     geometryEyebrow: "Геометрия",
     featuresEyebrow: "Признаки",
     referenceTitle: "Сравнение с reference",
     referenceEyebrow: "Reference-модель",
+    referencePartialTitle: "Reference comparison выполнен частично.",
     deviationsTitle: "Отклонения признаков",
     deviationsEyebrow: "Главные contributors",
     deviationsDescription: "Наибольшие стандартизованные отклонения признаков относительно выбранной reference-группы.",
@@ -255,6 +360,55 @@ export const messages: Record<Locale, Messages> = {
     limitationsEyebrow: "Интерпретация",
     artifactsTitle: "Артефакты и созданные файлы",
     artifactsEyebrow: "Выходы",
+    scoreTitle: "Экспериментальная обученная оценка",
+    scoreEyebrow: "Субъективный слой",
+    scoreDescription: "Опциональная экспериментальная оценка, обученная на scoring dataset с папками-метками. Этот блок отделён от objective morphometric report.",
+    scoreLabel: "Предсказанная оценка",
+    scoreModelLabel: "Основная модель",
+    scoreFeatureSetLabel: "Набор признаков",
+    scoreActiveSourceLabel: "Активный источник метрик",
+    scoreMediapipeUsedLabel: "Использовано MediaPipe-признаков",
+    scoreDirectMediapipeUsedLabel: "Прямых MediaPipe-признаков использовано",
+    scoreMediapipeDerivedRefUsedLabel: "Reference-relative признаков от MediaPipe использовано",
+    scoreMediapipeDerivedOnlyNote: "Прямые MediaPipe-признаки не используются, но reference-relative признаки, построенные от MediaPipe-метрик, участвуют в модели.",
+    scoreDiagnosticDisagreementTitle: "Детали расхождения диагностик",
+    scoreMediapipeNotUsedPrimary: "Расширенные MediaPipe-метрики рассчитаны и показаны, но текущая primary-модель их не использует.",
+    scoreNearestGroupLabel: "Ближайшая обучающая группа",
+    scoreDistanceToGroupLabel: "Расстояние до ближайшей группы",
+    scoreObservedRangeLabel: "Наблюдаемый диапазон обучения",
+    scoreSourceLabel: "Источник основной оценки",
+    scoreRawValueLabel: "Сырой score модели",
+    scoreCalibratedValueLabel: "Калиброванный score",
+    scoreCalibratedDiagnosticNote: "Калиброванный score является диагностическим и не заменяет основную оценку.",
+    scoreSelectedFeatureCount: "Выбранных признаков",
+    scoreReferenceUsedCount: "Использовано reference-relative признаков",
+    scoreNearestGroupDisclaimer: "Ближайшая обучающая группа — это справочная привязка к папкам датасета. Она не является самой оценкой.",
+    scoreRangeLabel: "Диапазон шкалы",
+    scorePrimaryCaption: "Основная оценка рассчитывается learned regression model по морфометрическим признакам.",
+    scoreUnavailableTitle: "Экспериментальная оценка недоступна.",
+    scoreWarningsTitle: "Предупреждения scorer",
+    scoreDiagnosticTitle: "Диагностические модели",
+    scoreExplanationTitle: "Локальное объяснение",
+    scoreComponentsTitle: "Вклады компонент",
+    scoreDiagnosticsCaption: "Эти диагностические модели служат дополнительной проверкой и не заменяют основную оценку.",
+    scoreExplanationUnavailable: "Для этого результата локальное объяснение недоступно.",
+    scoreExperimentalDisclaimer:
+      "Это экспериментальная обученная оценка привлекательности. Она зависит от датасета, использует строгую семантику шкалы и не является объективной истиной. Высокие значения отражают более редкие сочетания морфометрических сигналов, а не универсальное доказательство красоты.",
+    scoreWeightsTitle: "Что сильнее влияет на оценку",
+    scoreWeightsDisclaimer:
+      "Эти веса обучены на текущем scoring dataset 1-9.5. Они показывают важность признаков/групп для модели, а не причинную или универсальную истину.",
+    scoreFeatureTypesTitle: "Типы признаков, на которых основана модель",
+    scoreFeatureSourcesTitle: "Источники признаков",
+    scoreDebugTitle: "Отладка scorer",
+    scoreExplanationBaselineLabel: "Технический intercept модели (debug)",
+    scoreExplainedValueLabel: "Объясняемая оценка модели",
+    scoreExplanationMethodLabel: "Метод объяснения",
+    scoreUpwardContribution: "сдвинуло learned score вверх",
+    scoreDownwardContribution: "сдвинуло learned score вниз",
+    scoreModelContribution: "вклад модели",
+    scoreConfidenceHigh: "Уверенность: высокая",
+    scoreConfidenceMedium: "Уверенность: средняя",
+    scoreConfidenceLow: "Уверенность: низкая",
     emptyTitle: "Готово к первому анализу",
     emptyEyebrow: "Пустое состояние",
     emptyDescription: "Загрузите изображение лица, выберите reference-группу и запустите существующий backend pipeline через file-upload API.",

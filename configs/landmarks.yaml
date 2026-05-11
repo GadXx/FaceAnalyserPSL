@@ -1,0 +1,50 @@
+{
+  "landmarks": {
+    "report_paths": {
+      "capability_report_path": "reports/metrics/landmark_capability_report.json",
+      "mediapipe_runtime_diagnostics_path": "reports/metrics/mediapipe_runtime_diagnostics.json",
+      "mediapipe_debug_landmarks_path": "reports/debug/mediapipe_landmarks.json",
+      "mediapipe_debug_indices_image_path": "reports/debug/mediapipe_landmarks_indices.png",
+      "mediapipe_region_report_path": "reports/debug/mediapipe_landmark_regions.json"
+    },
+    "landmark_sources": {
+      "mediapipe_face_mesh": {
+        "enabled": true,
+        "required": true,
+        "optional": false,
+        "model": "face_landmarker",
+        "model_asset_path": "data/interim/mediapipe/face_landmarker.task",
+        "delegate": "cpu",
+        "fallback_to_cpu": true,
+        "output_landmarks": "468_or_478",
+        "static_image_mode": true,
+        "max_num_faces": 1,
+        "refine_landmarks": true,
+        "min_detection_confidence": 0.5,
+        "min_tracking_confidence": 0.5
+      },
+      "face_parsing": {
+        "enabled": false,
+        "optional": true,
+        "classes": [
+          "skin",
+          "hair",
+          "left_eye",
+          "right_eye",
+          "eyebrows",
+          "nose",
+          "upper_lip",
+          "lower_lip",
+          "mouth",
+          "ears",
+          "neck"
+        ]
+      },
+      "optional_3d_mesh": {
+        "enabled": false,
+        "optional": true,
+        "backend": "3ddfa_v2"
+      }
+    }
+  }
+}

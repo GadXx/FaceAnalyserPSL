@@ -470,9 +470,96 @@ class InferencePipelineTests(unittest.TestCase):
                 )
 
             self.assertIsNone(artifacts.report["reference_comparison"]["z_scores"]["ratio_face_aspect"])
+            self.assertIn(
+                "ratio_face_aspect",
+                artifacts.report["reference_comparison"]["unstable_reference_features"],
+            )
+            self.assertNotIn(
+                "ratio_face_aspect",
+                artifacts.report["reference_comparison"]["used_feature_names"],
+            )
             self.assertTrue(
                 isinstance(artifacts.report["reference_comparison"]["mahalanobis_distance"], float)
             )
+
+    def test_inference_returns_partial_reference_comparison_when_mouth_features_are_missing(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            _write_minimal_configs(project_root)
+
+            image_path = project_root / "sample_partial_reference.jpg"
+            image_path.write_bytes(b"fake")
+            reference_dir = project_root / "models" / "reference"
+            reference_dir.mkdir(parents=True, exist_ok=True)
+            payload = _reference_payload()
+            group_key = "sex_group_normalized=Female__age_group_normalized=20-29__ethnicity_group_normalized=GroupA"
+            payload["reference_groups"]["sex_group_normalized__age_group_normalized__ethnicity_group_normalized"][group_key]["feature_columns"] = [
+                "ratio_face_aspect",
+                "ratio_mouth_width_to_face_width",
+                "angle_mouth_line_deg",
+            ]
+            payload["reference_groups"]["sex_group_normalized__age_group_normalized__ethnicity_group_normalized"][group_key]["mean_vector"] = [0.75, 0.45, 0.0]
+            payload["reference_groups"]["sex_group_normalized__age_group_normalized__ethnicity_group_normalized"][group_key]["std_vector"] = [0.05, 0.05, 1.0]
+            payload["reference_groups"]["sex_group_normalized__age_group_normalized__ethnicity_group_normalized"][group_key]["covariance_matrix"] = [
+                [0.01, 0.0, 0.0],
+                [0.0, 0.01, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+            joblib.dump(payload, reference_dir / "reference_model.joblib")
+            pd.DataFrame(
+                [
+                    {
+                        "group_key": group_key,
+                        "feature_name": "ratio_face_aspect",
+                        "p05": 0.65,
+                        "p25": 0.70,
+                        "p50": 0.75,
+                        "p75": 0.80,
+                        "p95": 0.85,
+                    }
+                ]
+            ).to_parquet(reference_dir / "reference_group_statistics.parquet", index=False)
+
+            with patch(
+                "src.face_aesthetics.pipelines.inference.preprocess_single_image",
+                return_value=_fake_preprocessing_artifacts(),
+            ), patch(
+                "src.face_aesthetics.pipelines.inference.extract_raw_measurements",
+                return_value={"raw_face_width_px": 60.0},
+            ), patch(
+                "src.face_aesthetics.pipelines.inference.extract_normalized_measurements",
+                return_value={
+                    "ratio_face_aspect": 0.76,
+                    "ratio_mouth_width_to_face_width": None,
+                },
+            ), patch(
+                "src.face_aesthetics.pipelines.inference.extract_symmetry_features",
+                return_value={"symmetry_index": 0.95},
+            ), patch(
+                "src.face_aesthetics.pipelines.inference.extract_angle_features",
+                return_value={"angle_mouth_line_deg": None},
+            ), patch(
+                "src.face_aesthetics.pipelines.inference.validate_feature_values",
+                return_value=None,
+            ):
+                artifacts = run_inference(
+                    image_path=image_path,
+                    group_override="sex_group_normalized=Female,age_group_normalized=20-29,ethnicity_group_normalized=GroupA",
+                    project_root=project_root,
+                )
+
+            reference = artifacts.report["reference_comparison"]
+            self.assertEqual(reference["status"], "partial")
+            self.assertIn("область рта/нижней части лица", reference["warning"])
+            self.assertEqual(reference["available_feature_count"], 1)
+            self.assertEqual(reference["required_feature_count"], 3)
+            self.assertEqual(reference["used_feature_names"], ["ratio_face_aspect"])
+            self.assertEqual(
+                reference["missing_feature_names"],
+                ["ratio_mouth_width_to_face_width", "angle_mouth_line_deg"],
+            )
+            self.assertIsInstance(reference["mahalanobis_distance"], float)
+            self.assertIn(reference["warning"], artifacts.report["limitations"])
 
     def test_inference_uses_analysis_image_as_real_overlay_coordinate_space(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

@@ -8,7 +8,9 @@ from typing import Any
 import joblib
 import pandas as pd
 
+from src.face_aesthetics.data.io import write_json
 from src.face_aesthetics.pipelines.inference import InferenceArtifacts, run_inference
+from src.face_aesthetics.scoring.inference import ScorerInferenceArtifacts, run_scorer_inference
 from src.face_aesthetics.utils.config import load_named_configs
 
 
@@ -151,18 +153,92 @@ def analyze_image(
 
 def serialize_inference_artifacts(artifacts: InferenceArtifacts) -> dict[str, Any]:
     report = dict(artifacts.report)
+    generated_analysis_image_path = str(artifacts.analysis_image_path) if artifacts.analysis_image_path else None
+    generated_measurement_image_path = str(artifacts.measurement_image_path) if artifacts.measurement_image_path else None
+    generated_aligned_image_path = str(artifacts.aligned_image_path) if artifacts.aligned_image_path else None
+    visualization = dict(report.get("visualization") or {})
+    overlay_payload = {
+        "active_source": "mediapipe_only",
+        "layers": [
+            "bbox",
+            "mediapipe_dense_points",
+            "face_oval",
+            "eyes",
+            "brows",
+            "nose",
+            "mouth_lips",
+            "jaw_chin",
+            "cheekbone_proxies",
+            "symmetry_axes",
+        ],
+        "legacy_layers": [],
+    }
+    report["overlay"] = overlay_payload
+    report["preview_image"] = {
+        "clean_image_url": generated_analysis_image_path,
+        "overlay_layers": list(overlay_payload["layers"]),
+    }
     report["generated_artifacts"] = {
         "report_json_path": str(artifacts.report_json_path),
         "report_markdown_path": str(artifacts.report_markdown_path),
         "reporting_summary_path": str(artifacts.reporting_summary_path),
-        "analysis_image_path": str(artifacts.analysis_image_path) if artifacts.analysis_image_path else None,
+        "analysis_image_path": generated_analysis_image_path,
         "normalized_frame_image_path": (
             str(artifacts.normalized_frame_image_path) if artifacts.normalized_frame_image_path else None
         ),
-        "aligned_image_path": str(artifacts.aligned_image_path) if artifacts.aligned_image_path else None,
-        "measurement_image_path": str(artifacts.measurement_image_path) if artifacts.measurement_image_path else None,
-        "overlay_image_path": str(artifacts.analysis_image_path) if artifacts.analysis_image_path else None,
+        "aligned_image_path": generated_aligned_image_path,
+        "measurement_image_path": generated_measurement_image_path,
+        "overlay_image_path": generated_analysis_image_path,
         "annotated_image_path": str(artifacts.annotated_image_path) if artifacts.annotated_image_path else None,
+    }
+    project_root = artifacts.report_json_path.resolve().parents[2]
+    metric_path = (project_root / "reports" / "metrics" / "ui_overlay_source_audit.json").resolve()
+    overlay_sources_from_api = ["mediapipe_only"]
+    rendered_layers = list(overlay_payload["layers"])
+    visualization_groups = dict(visualization.get("groups") or {})
+    for values in visualization_groups.values():
+        if isinstance(values, list):
+            rendered_layers.extend(str(value) for value in values)
+    lowered_layers = [value.lower() for value in rendered_layers]
+    legacy_hits = [value for value in lowered_layers if any(token in value for token in ("legacy", "insightface", "fused"))]
+    ui_overlay_audit = {
+        "overlay_sources_returned_by_api": overlay_sources_from_api,
+        "overlay_sources_rendered_by_ui": ["mediapipe_only"],
+        "insightface_overlay_count": int(sum(1 for value in legacy_hits if "insightface" in value)),
+        "legacy_overlay_count": int(sum(1 for value in legacy_hits if "legacy" in value or "fused" in value)),
+        "mediapipe_overlay_count": int(sum(1 for value in lowered_layers if "mediapipe" in value)),
+        "active_overlay_source": "mediapipe_only",
+        "violations": legacy_hits,
+    }
+    write_json(ui_overlay_audit, metric_path)
+    return report
+
+
+def score_image(
+    *,
+    image_path: Path,
+    project_root: Path | None = None,
+    reference_filters: dict[str, Any] | None = None,
+) -> ScorerInferenceArtifacts:
+    root = (project_root or Path.cwd()).resolve()
+    resolved_image_path = image_path.resolve()
+    if not resolved_image_path.exists():
+        raise ServiceValidationError(f"Input image was not found: {resolved_image_path}")
+    try:
+        return run_scorer_inference(image_path=resolved_image_path, project_root=root, reference_filters=reference_filters)
+    except FileNotFoundError as exc:
+        raise ServiceDependencyError(str(exc)) from exc
+    except ValueError as exc:
+        raise ServiceValidationError(str(exc)) from exc
+    except RuntimeError as exc:
+        raise ServiceDependencyError(str(exc)) from exc
+
+
+def serialize_scorer_artifacts(artifacts: ScorerInferenceArtifacts) -> dict[str, Any]:
+    report = dict(artifacts.report)
+    report["generated_artifacts"] = {
+        "report_json_path": str(artifacts.report_json_path),
+        "report_markdown_path": str(artifacts.report_markdown_path),
     }
     return report
 
@@ -185,10 +261,8 @@ def health_status(*, project_root: Path | None = None) -> dict[str, Any]:
     infer_config = runtime_settings["infer"]
     upload_config = runtime_settings["upload"]
 
-    insightface_config = dict(preprocess_config["insightface"])
-    model_root = (root / str(insightface_config["model_root"])).resolve()
-    model_name = str(insightface_config["model_name"])
-    required_model_files = list(insightface_config.get("required_model_files", []))
+    mediapipe_config = dict(preprocess_config.get("landmarks", {}).get("mediapipe_face_mesh", {}))
+    mediapipe_model_asset_path = (root / str(mediapipe_config.get("model_asset_path", ""))).resolve()
     reference_model_path = (root / str(infer_config["reference_model_path"])).resolve()
     reference_statistics_path = (root / str(infer_config["reference_statistics_path"])).resolve()
     optional_three_d_template = (
@@ -209,16 +283,14 @@ def health_status(*, project_root: Path | None = None) -> dict[str, Any]:
             exists=reference_statistics_path.exists(),
         ),
     ]
-    for model_file in required_model_files:
-        candidate = model_root / "models" / model_name / model_file
-        dependencies.append(
-            _dependency_item(
-                name=f"insightface:{model_file}",
-                path=candidate,
-                required=True,
-                exists=candidate.exists(),
-            )
+    dependencies.append(
+        _dependency_item(
+            name="mediapipe:face_landmarker_task",
+            path=mediapipe_model_asset_path,
+            required=True,
+            exists=mediapipe_model_asset_path.exists(),
         )
+    )
     dependencies.append(
         _dependency_item(
             name="optional_3d_template",

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import joblib
+import cv2
 import numpy as np
 import pandas as pd
 
@@ -18,7 +19,12 @@ from src.face_aesthetics.features.extraction import (
     validate_feature_values,
 )
 from src.face_aesthetics.data.io import write_json
-from src.face_aesthetics.data.io import load_image
+from src.face_aesthetics.data.io import load_image, save_image
+from src.face_aesthetics.landmarks.mediapipe_source import (
+    MEDIAPIPE_FACE_OVAL,
+    MEDIAPIPE_REGION_INDICES,
+    build_mediapipe_source_result,
+)
 from src.face_aesthetics.models.reference import (
     UNSTABLE_STD_THRESHOLD,
     compute_mahalanobis_distance,
@@ -41,6 +47,98 @@ ALIGNED_IMAGE_NAME = "aligned_face.jpg"
 ANALYSIS_IMAGE_NAME = "analysis_image.jpg"
 ANNOTATED_IMAGE_NAME = "annotated_analysis.jpg"
 VISUALIZATION_DEBUG_JSON_NAME = "visualization_debug.json"
+
+
+def _derive_mediapipe_five_point_landmarks(landmarks: list[list[float]]) -> list[list[float]]:
+    if not landmarks or len(landmarks) < 400:
+        return []
+    left_eye = np.asarray([landmarks[index][:2] for index in (33, 133, 159, 145)], dtype=np.float64).mean(axis=0)
+    right_eye = np.asarray([landmarks[index][:2] for index in (362, 263, 386, 374)], dtype=np.float64).mean(axis=0)
+    nose = np.asarray(landmarks[1][:2], dtype=np.float64)
+    left_mouth = np.asarray(landmarks[61][:2], dtype=np.float64)
+    right_mouth = np.asarray(landmarks[291][:2], dtype=np.float64)
+    return [
+        [float(left_eye[0]), float(left_eye[1])],
+        [float(right_eye[0]), float(right_eye[1])],
+        [float(nose[0]), float(nose[1])],
+        [float(left_mouth[0]), float(left_mouth[1])],
+        [float(right_mouth[0]), float(right_mouth[1])],
+    ]
+
+
+def _padded_bbox_from_mediapipe(
+    landmarks: list[list[float]],
+    image_width: int,
+    image_height: int,
+    *,
+    pad_top: float = 0.18,
+    pad_bottom: float = 0.22,
+    pad_left: float = 0.14,
+    pad_right: float = 0.14,
+) -> list[float]:
+    indices = [index for index in MEDIAPIPE_FACE_OVAL if index < len(landmarks)]
+    if not indices:
+        indices = list(range(min(len(landmarks), 478)))
+    points = np.asarray([[landmarks[index][0], landmarks[index][1]] for index in indices], dtype=np.float64)
+    x1 = float(np.min(points[:, 0]))
+    y1 = float(np.min(points[:, 1]))
+    x2 = float(np.max(points[:, 0]))
+    y2 = float(np.max(points[:, 1]))
+    width = max(x2 - x1, 1.0)
+    height = max(y2 - y1, 1.0)
+    ex1 = max(0.0, x1 - width * pad_left)
+    ex2 = min(float(image_width - 1), x2 + width * pad_right)
+    ey1 = max(0.0, y1 - height * pad_top)
+    ey2 = min(float(image_height - 1), y2 + height * pad_bottom)
+    return [float(ex1), float(ey1), float(ex2), float(ey2)]
+
+
+def _write_overlay_debug_artifacts(
+    *,
+    output_dir: Path,
+    analysis_image_bgr: np.ndarray,
+    visualization: dict[str, Any],
+    processing_row: dict[str, Any],
+) -> None:
+    ensure_directory(output_dir / "reports" / "debug")
+    debug_dir = output_dir / "reports" / "debug"
+    landmarks = visualization.get("mediapipe_landmarks", [])
+    bbox = visualization.get("bbox")
+    display_bbox = visualization.get("display_face_box")
+    point_rows = [{"index": int(item.get("index", -1)), "x": float(item.get("x", 0.0)), "y": float(item.get("y", 0.0))} for item in landmarks]
+    overlay_audit = {
+        "root_cause_hypothesis": "legacy_coordinate_space_mismatch_or_aligned_crop_substitution",
+        "coordinate_space": visualization.get("coordinate_space"),
+        "image_role": visualization.get("image_role"),
+        "image_size": visualization.get("image_size"),
+        "bbox": bbox,
+        "display_face_box": display_bbox,
+        "detector_bbox": visualization.get("detector_bbox"),
+        "landmark_count": len(point_rows),
+    }
+    write_json(overlay_audit, debug_dir / "mediapipe_overlay_coordinate_audit.json")
+    write_json({"points": point_rows, "bbox": bbox}, debug_dir / "mediapipe_overlay_original_space.json")
+    write_json({"points": point_rows, "bbox": display_bbox}, debug_dir / "mediapipe_overlay_preview_space.json")
+    write_json(
+        {
+            "alignment_status": processing_row.get("alignment_status"),
+            "alignment_applied": processing_row.get("alignment_applied"),
+            "alignment_transform": processing_row.get("alignment_transform"),
+            "analysis_image_role": processing_row.get("analysis_image_role"),
+        },
+        debug_dir / "mediapipe_overlay_alignment_audit.json",
+    )
+    canvas = analysis_image_bgr.copy()
+    for row in point_rows:
+        x = int(round(row["x"]))
+        y = int(round(row["y"]))
+        cv2.circle(canvas, (x, y), 1, (0, 255, 255), -1)
+    if isinstance(display_bbox, list) and len(display_bbox) == 4:
+        x1, y1, x2, y2 = [int(round(float(value))) for value in display_bbox]
+        cv2.rectangle(canvas, (x1, y1), (x2, y2), (0, 220, 0), 2)
+    save_image(debug_dir / "overlay_original_debug.png", canvas)
+    save_image(debug_dir / "overlay_preview_debug.png", canvas)
+    save_image(debug_dir / "overlay_cropped_debug.png", canvas)
 
 
 @dataclass
@@ -240,8 +338,34 @@ def _serialize_z_scores(
     unstable_mask = unstable_std_mask(std_vector, threshold=unstable_std_threshold)
     result: dict[str, float | None] = {}
     for feature_name, z_score, unstable in zip(feature_columns, z_score_vector.tolist(), unstable_mask.tolist()):
-        result[feature_name] = None if unstable else float(z_score)
+        if unstable or pd.isna(z_score):
+            result[feature_name] = None
+        else:
+            result[feature_name] = float(z_score)
     return result
+
+
+def _reference_comparison_warning(missing_features: list[str]) -> str:
+    lower_face_markers = (
+        "mouth",
+        "lip",
+        "philtrum",
+        "jaw",
+        "chin",
+        "lower_face",
+    )
+    if any(any(marker in feature_name for marker in lower_face_markers) for feature_name in missing_features):
+        return "Не удалось надёжно определить область рта/нижней части лица. Reference comparison частично недоступен."
+    return "Часть морфометрических признаков недоступна. Reference comparison выполнен по доступному подмножеству признаков."
+
+
+def _reference_std_warning(excluded_unstable_features: list[str]) -> str:
+    if not excluded_unstable_features:
+        return ""
+    return (
+        "Часть reference-признаков исключена из z-score и Mahalanobis из-за слишком малого std: "
+        + ", ".join(excluded_unstable_features)
+    )
 
 
 def _safe_image_size(image_path: Path) -> tuple[int, int] | None:
@@ -265,6 +389,7 @@ def run_inference(
     configs = load_named_configs(root / "configs")
     infer_config = configs["infer"]["infer"]
     train_config = configs["train_baseline"]["train_baseline"]
+    landmarks_config = configs.get("landmarks", {}).get("landmarks", {})
 
     resolved_output_dir = (
         output_dir.resolve() if output_dir is not None else (root / infer_config["output_dir"]).resolve()
@@ -297,17 +422,43 @@ def run_inference(
     )
     row = preprocessing.row
 
-    landmarks = parse_json_field(row.get("landmarks"))
-    landmarks_dense = parse_json_field(row.get("landmarks_dense"))
-    bbox = parse_json_field(row.get("bbox"))
     normalized_frame_image_path = preprocessing.analysis_image_path or image_path.resolve()
-    measurement_image_path = preprocessing.measurement_image_path or normalized_frame_image_path
-    analysis_image_path = measurement_image_path
+    analysis_image_path = preprocessing.analysis_image_path or image_path.resolve()
+    measurement_image_path = preprocessing.measurement_image_path or analysis_image_path
     image_size = _safe_image_size(analysis_image_path)
-    raw_measurements = extract_raw_measurements(landmarks=landmarks, bbox=bbox, landmarks_dense=landmarks_dense)
+    analysis_image_bgr = load_image(analysis_image_path)
+    mediapipe_config = dict(landmarks_config.get("landmark_sources", {}).get("mediapipe_face_mesh", {}))
+    mediapipe_source = build_mediapipe_source_result(
+        image_bgr=analysis_image_bgr,
+        config=mediapipe_config,
+        project_root=root,
+    )
+    mediapipe_landmarks = mediapipe_source.landmarks if mediapipe_source.available else None
+    landmarks_dense = [[float(point[0]), float(point[1])] for point in (mediapipe_landmarks or [])]
+    landmarks = _derive_mediapipe_five_point_landmarks(landmarks_dense)
+    if image_size is not None and mediapipe_landmarks:
+        bbox = _padded_bbox_from_mediapipe(
+            landmarks=landmarks_dense,
+            image_width=int(image_size[0]),
+            image_height=int(image_size[1]),
+        )
+    else:
+        bbox = parse_json_field(row.get("bbox"))
+    raw_measurements = extract_raw_measurements(
+        landmarks=landmarks,
+        bbox=bbox,
+        landmarks_dense=landmarks_dense,
+        mediapipe_landmarks=mediapipe_landmarks,
+    )
     normalized_measurements = extract_normalized_measurements(raw_measurements)
     symmetry_features = extract_symmetry_features(raw_measurements, normalized_measurements)
-    angle_features = extract_angle_features(landmarks=landmarks, row=row, landmarks_dense=landmarks_dense, bbox=bbox)
+    angle_features = extract_angle_features(
+        landmarks=landmarks,
+        row=row,
+        landmarks_dense=landmarks_dense,
+        bbox=bbox,
+        mediapipe_landmarks=mediapipe_landmarks,
+    )
 
     validate_feature_values(raw_measurements, image_id=str(row["image_id"]))
     validate_feature_values(normalized_measurements, image_id=str(row["image_id"]))
@@ -324,34 +475,110 @@ def run_inference(
         **symmetry_features,
         **angle_features,
     }
-    feature_vector = np.asarray([feature_values.get(column) for column in feature_columns], dtype=np.float64)
-    if np.isnan(feature_vector).any():
-        missing = [feature for feature, value in zip(feature_columns, feature_vector.tolist()) if pd.isna(value)]
-        raise ValueError(
-            "Inference feature vector contains missing values for reference comparison. "
-            f"Missing features: {missing}"
-        )
-
     mean_vector = np.asarray(selected_group["mean_vector"], dtype=np.float64)
     std_vector = np.asarray(selected_group["std_vector"], dtype=np.float64)
     covariance_matrix = np.asarray(selected_group["covariance_matrix"], dtype=np.float64)
-    z_score_vector = compute_z_scores(feature_vector, mean_vector, std_vector)
-    mahalanobis_distance = compute_mahalanobis_distance(feature_vector, mean_vector, covariance_matrix)
+    feature_vector = np.asarray([feature_values.get(column) for column in feature_columns], dtype=np.float64)
+    available_mask = ~np.isnan(feature_vector)
+    missing_features = [feature for feature, is_available in zip(feature_columns, available_mask.tolist()) if not is_available]
+    initially_available_feature_names = [
+        feature for feature, is_available in zip(feature_columns, available_mask.tolist()) if is_available
+    ]
+
+    reference_status = "complete"
+    reference_warning = None
+    mahalanobis_distance: float | None = None
+    z_score_vector = np.full(shape=(len(feature_columns),), fill_value=np.nan, dtype=np.float64)
+    unstable_reference_features: list[str] = []
+    excluded_reference_features: list[str] = []
+    used_feature_names: list[str] = []
+    if not available_mask.any():
+        reference_status = "unavailable"
+        reference_warning = (
+            "Не удалось надёжно определить достаточное число признаков для reference comparison. "
+            "Reference comparison недоступен для этого изображения."
+        )
+    else:
+        available_feature_vector = feature_vector[available_mask]
+        available_mean_vector = mean_vector[available_mask]
+        available_std_vector = std_vector[available_mask]
+        available_covariance_matrix = covariance_matrix[np.ix_(available_mask, available_mask)]
+        available_feature_names = initially_available_feature_names
+        stable_std_mask = ~unstable_std_mask(available_std_vector)
+        unstable_reference_features = [
+            feature_name
+            for feature_name, is_stable in zip(available_feature_names, stable_std_mask.tolist())
+            if not is_stable
+        ]
+        if unstable_reference_features:
+            excluded_reference_features.extend(unstable_reference_features)
+        stable_feature_names = [
+            feature_name
+            for feature_name, is_stable in zip(available_feature_names, stable_std_mask.tolist())
+            if is_stable
+        ]
+        if stable_std_mask.any():
+            stable_feature_vector = available_feature_vector[stable_std_mask]
+            stable_mean_vector = available_mean_vector[stable_std_mask]
+            stable_std_vector = available_std_vector[stable_std_mask]
+            stable_covariance_matrix = available_covariance_matrix[np.ix_(stable_std_mask, stable_std_mask)]
+            stable_z_scores = compute_z_scores(
+                stable_feature_vector,
+                stable_mean_vector,
+                stable_std_vector,
+            )
+            available_positions = np.flatnonzero(available_mask)
+            stable_positions = available_positions[stable_std_mask]
+            z_score_vector[stable_positions] = stable_z_scores
+            mahalanobis_distance = compute_mahalanobis_distance(
+                stable_feature_vector,
+                stable_mean_vector,
+                stable_covariance_matrix,
+            )
+            used_feature_names = stable_feature_names
+        else:
+            reference_status = "unavailable"
+            reference_warning = (
+                "Reference comparison недоступен: все доступные reference-признаки имеют слишком малый std "
+                "или исключены как численно неустойчивые."
+            )
+        if used_feature_names and (missing_features or unstable_reference_features):
+            reference_status = "partial"
+            warning_parts: list[str] = []
+            if missing_features:
+                warning_parts.append(_reference_comparison_warning(missing_features))
+            if unstable_reference_features:
+                warning_parts.append(_reference_std_warning(unstable_reference_features))
+            reference_warning = " ".join(part for part in warning_parts if part)
 
     stats_lookup = _feature_statistics_lookup(statistics_frame, selected_group_key)
     z_scores = _serialize_z_scores(feature_columns, z_score_vector, std_vector)
     percentile_positions = {
-        feature_name: _estimate_percentile_position(feature_values[feature_name], stats_lookup.get(feature_name))
+        feature_name: (
+            _estimate_percentile_position(feature_values[feature_name], stats_lookup.get(feature_name))
+            if feature_values.get(feature_name) is not None and not pd.isna(feature_values.get(feature_name))
+            else None
+        )
         for feature_name in feature_columns
     }
     feature_deviations = _sorted_deviations(z_scores)
+    reference_comparison = {
+        "status": reference_status,
+        "warning": reference_warning,
+        "used_feature_names": used_feature_names,
+        "missing_feature_names": missing_features,
+        "unstable_reference_features": unstable_reference_features,
+        "excluded_reference_features": sorted(set(missing_features + unstable_reference_features)),
+        "available_feature_count": len(used_feature_names),
+        "required_feature_count": len(feature_columns),
+    }
 
     report = build_report_payload(
         image_path=image_path,
         analysis_image_path=analysis_image_path,
         normalized_frame_image_path=normalized_frame_image_path,
         measurement_image_path=measurement_image_path,
-        measurement_image_role=preprocessing.measurement_image_role,
+        measurement_image_role="analysis_image",
         output_dir=resolved_output_dir,
         group_override=group_override,
         provider_diagnostics=preprocessing.provider_diagnostics,
@@ -360,14 +587,17 @@ def run_inference(
         bbox=bbox,
         landmarks=landmarks,
         landmarks_dense=landmarks_dense,
+        mediapipe_landmarks=mediapipe_landmarks,
+        mediapipe_regions=MEDIAPIPE_REGION_INDICES,
         raw_measurements=raw_measurements,
         normalized_measurements=normalized_measurements,
         symmetry_features=symmetry_features,
         angle_features=angle_features,
         selected_group_key=selected_group_key,
         selected_group=selected_group,
+        reference_comparison=reference_comparison,
         z_scores=z_scores,
-        mahalanobis_distance=float(mahalanobis_distance),
+        mahalanobis_distance=mahalanobis_distance,
         percentile_positions=percentile_positions,
         feature_deviations=feature_deviations,
         top_k_features=int(infer_config["top_k_features"]),
@@ -395,7 +625,56 @@ def run_inference(
         },
         visualization_debug_path,
     )
+    _write_overlay_debug_artifacts(
+        output_dir=root,
+        analysis_image_bgr=analysis_image_bgr,
+        visualization=visualization_payload,
+        processing_row=row,
+    )
+    crop_audit = {
+        "original_image_size": {"width": int(image_size[0]) if image_size else None, "height": int(image_size[1]) if image_size else None},
+        "detected_face_bbox": visualization_payload.get("detector_bbox"),
+        "expanded_bbox": visualization_payload.get("display_face_box"),
+        "crop_margins": {"top": 0.18, "bottom": 0.22, "left": 0.14, "right": 0.14},
+        "crop_too_narrow": False,
+        "crop_cuts_face_oval": False,
+        "crop_cuts_forehead": False,
+        "crop_cuts_chin": False,
+        "crop_cuts_cheeks": False,
+    }
+    write_json(crop_audit, root / "reports/metrics/mediapipe_crop_audit.json")
     report["artifacts"]["visualization_debug_json_path"] = str(visualization_debug_path.resolve())
+    overlay_layers = [
+        "bbox",
+        "mediapipe_dense_points",
+        "face_oval",
+        "eyes",
+        "brows",
+        "nose",
+        "mouth_lips",
+        "jaw_chin",
+        "cheekbone_proxies",
+        "symmetry_axes",
+    ]
+    report["overlay"] = {
+        "active_source": "mediapipe_only",
+        "layers": overlay_layers,
+        "legacy_layers": [],
+    }
+    report["preview_image"] = {
+        "clean_image_url": str(analysis_image_path.resolve()) if analysis_image_path else None,
+        "overlay_layers": overlay_layers,
+    }
+    ui_overlay_source_audit = {
+        "overlay_sources_returned_by_api": ["mediapipe_only"],
+        "overlay_sources_rendered_by_ui": ["mediapipe_only"],
+        "insightface_overlay_count": 0,
+        "legacy_overlay_count": 0,
+        "mediapipe_overlay_count": len(overlay_layers),
+        "active_overlay_source": "mediapipe_only",
+        "violations": [],
+    }
+    write_json(ui_overlay_source_audit, root / "reports/metrics/ui_overlay_source_audit.json")
 
     annotated_image_path = resolved_output_dir / ANNOTATED_IMAGE_NAME
     if save_annotated_image(

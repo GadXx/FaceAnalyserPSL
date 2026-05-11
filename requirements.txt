@@ -5,7 +5,6 @@ scikit-learn
 torch
 torchvision
 opencv-python
-insightface
 xgboost
 lightgbm
 matplotlib
@@ -15,3 +14,4 @@ pydantic
 pyyaml
 hydra-core
 python-multipart
+mediapipe

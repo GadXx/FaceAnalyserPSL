@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+import pandas as pd
 
 from src.face_aesthetics.data.io import load_image, read_parquet, write_json, write_parquet
 from src.face_aesthetics.features.extraction_3d import (
@@ -10,6 +13,11 @@ from src.face_aesthetics.features.extraction_3d import (
     extract_geometry_3d_features,
     validate_3d_feature_values,
 )
+from src.face_aesthetics.landmarks.fusion import (
+    build_landmark_capability_report,
+    write_landmark_capability_artifacts,
+)
+from src.face_aesthetics.landmarks.mediapipe_source import build_mediapipe_source_result
 from src.face_aesthetics.features.extraction import (
     ANGLE_FEATURE_COLUMNS,
     NORMALIZED_MEASUREMENT_COLUMNS,
@@ -25,7 +33,6 @@ from src.face_aesthetics.features.extraction import (
     parse_json_field,
     validate_feature_values,
 )
-from src.face_aesthetics.services.embedding import InsightFaceEmbedder
 from src.face_aesthetics.utils.config import load_named_configs
 
 
@@ -35,6 +42,11 @@ BASE_COLUMNS = [
     "subject_id",
     "image_id",
     "split",
+    "raw_labels",
+    "normalized_labels",
+    "sex_group_normalized",
+    "age_group_normalized",
+    "ethnicity_group_normalized",
     "image_path",
     "aligned_image_path",
     "reference_model",
@@ -74,13 +86,94 @@ def _is_nonempty(value: Any) -> bool:
     return True
 
 
+def _parse_json_payload(value: Any) -> dict[str, Any]:
+    parsed = parse_json_field(value)
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _json_field_or_none(value: Any) -> str | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=True, sort_keys=True)
+    return str(value)
+
+
+def _resolve_group_value(
+    normalized_labels: dict[str, Any],
+    *,
+    row: dict[str, Any],
+    canonical_name: str,
+    aliases: list[str],
+) -> str | None:
+    direct_value = row.get(canonical_name)
+    if _is_nonempty(direct_value):
+        return str(direct_value).strip()
+
+    for alias in aliases:
+        alias_value = row.get(alias)
+        if _is_nonempty(alias_value):
+            return str(alias_value).strip()
+
+    for alias in aliases:
+        alias_value = normalized_labels.get(alias)
+        if _is_nonempty(alias_value):
+            return str(alias_value).strip()
+
+    return None
+
+
 def _base_row(row: dict[str, Any], default_reference_model: str) -> dict[str, Any]:
+    normalized_labels = _parse_json_payload(row.get("normalized_labels"))
+    group_aliases = {
+        "sex_group_normalized": [
+            "sex_group_normalized",
+            "gender_group_normalized",
+            "gender_presentation",
+            "sex",
+            "gender",
+        ],
+        "age_group_normalized": [
+            "age_group_normalized",
+            "age_group",
+            "age_bucket",
+        ],
+        "ethnicity_group_normalized": [
+            "ethnicity_group_normalized",
+            "ethnicity_group",
+            "race_group",
+            "race",
+        ],
+    }
     return {
         "dataset_name": row.get("dataset_name"),
         "sample_id": row.get("sample_id"),
         "subject_id": row.get("subject_id"),
         "image_id": row["image_id"],
         "split": row.get("split"),
+        "raw_labels": _json_field_or_none(row.get("raw_labels")),
+        "normalized_labels": _json_field_or_none(row.get("normalized_labels")),
+        "sex_group_normalized": _resolve_group_value(
+            normalized_labels,
+            row=row,
+            canonical_name="sex_group_normalized",
+            aliases=group_aliases["sex_group_normalized"],
+        ),
+        "age_group_normalized": _resolve_group_value(
+            normalized_labels,
+            row=row,
+            canonical_name="age_group_normalized",
+            aliases=group_aliases["age_group_normalized"],
+        ),
+        "ethnicity_group_normalized": _resolve_group_value(
+            normalized_labels,
+            row=row,
+            canonical_name="ethnicity_group_normalized",
+            aliases=group_aliases["ethnicity_group_normalized"],
+        ),
         "image_path": row.get("image_path"),
         "aligned_image_path": row.get("aligned_image_path"),
         "reference_model": row.get("reference_model") or default_reference_model,
@@ -131,28 +224,9 @@ def _eligible_rows(
     return rows, counters
 
 
-def _build_embedder_if_available(features_config: dict[str, Any], root: Path) -> tuple[InsightFaceEmbedder | None, str | None]:
-    embedding_config = dict(features_config.get("auxiliary_embeddings", {}))
-    if not embedding_config.get("enabled", False):
-        return None, "auxiliary_embeddings_disabled"
-
-    encoder_model_path = (root / str(embedding_config["encoder_model_path"])).resolve()
-    if not encoder_model_path.exists():
-        return None, f"auxiliary_encoder_missing:{encoder_model_path.relative_to(root).as_posix()}"
-
-    try:
-        return (
-            InsightFaceEmbedder(
-                encoder_name=str(embedding_config["encoder_name"]),
-                encoder_model_path=encoder_model_path,
-                providers=list(embedding_config["providers"]),
-                ctx_id=int(embedding_config["ctx_id"]),
-                expected_embedding_dim=int(embedding_config["embedding_dim"]),
-            ),
-            None,
-        )
-    except Exception as exc:
-        return None, f"auxiliary_encoder_unavailable:{exc}"
+def _build_embedder_if_available(features_config: dict[str, Any], root: Path) -> tuple[Any | None, str | None]:
+    _ = (features_config, root)
+    return None, "auxiliary_embeddings_removed_mediapipe_only"
 
 
 def _load_3d_manifest_lookup(manifest_path: Path) -> dict[str, dict[str, Any]]:
@@ -162,7 +236,69 @@ def _load_3d_manifest_lookup(manifest_path: Path) -> dict[str, dict[str, Any]]:
     return {str(row["image_id"]): row for row in rows if row.get("image_id")}
 
 
-def run_feature_extraction(project_root: Path | None = None) -> FeatureExtractionArtifacts:
+def _feature_statistics_payload(
+    geometry_rows: list[dict[str, Any]],
+    registry_rows: list[dict[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+    registry_by_name = {str(row["feature_name"]): row for row in registry_rows}
+    feature_columns = geometry_feature_columns()
+    frame = pd.DataFrame(geometry_rows)
+    expanded_rows: list[dict[str, Any]] = []
+    missingness_rows: list[dict[str, Any]] = []
+    reliability_rows: list[dict[str, Any]] = []
+    for feature_name in feature_columns:
+        numeric = pd.to_numeric(frame.get(feature_name), errors="coerce") if feature_name in frame.columns else pd.Series(dtype=float)
+        missing_rate = float(numeric.isna().mean()) if len(numeric) else 1.0
+        nonfinite_count = int(numeric.isna().sum()) if len(numeric) else len(geometry_rows)
+        finite = numeric.dropna()
+        variance = float(finite.var()) if len(finite) > 1 else 0.0
+        min_value = float(finite.min()) if len(finite) else None
+        max_value = float(finite.max()) if len(finite) else None
+        metadata = registry_by_name.get(feature_name, {})
+        expanded_rows.append(
+            {
+                "feature_name": feature_name,
+                "missing_rate": missing_rate,
+                "nonfinite_count": nonfinite_count,
+                "variance": variance,
+                "min": min_value,
+                "max": max_value,
+                "reliability": metadata.get("reliability"),
+                "recommended_for_scorer": bool(metadata.get("recommended_for_scorer", False)),
+                "exclusion_reason": metadata.get("exclusion_reason"),
+                "source": metadata.get("source"),
+                "component": metadata.get("component"),
+            }
+        )
+        missingness_rows.append(
+            {
+                "feature_name": feature_name,
+                "missing_rate": missing_rate,
+                "nonfinite_count": nonfinite_count,
+            }
+        )
+        reliability_rows.append(
+            {
+                "feature_name": feature_name,
+                "reliability": metadata.get("reliability"),
+                "recommended_for_scorer": bool(metadata.get("recommended_for_scorer", False)),
+                "exclusion_reason": metadata.get("exclusion_reason"),
+                "reference_inclusion": metadata.get("reference_inclusion"),
+            }
+        )
+    return (
+        {"feature_count": len(expanded_rows), "rows": expanded_rows},
+        {"rows": missingness_rows},
+        {"rows": reliability_rows},
+    )
+
+
+def run_feature_extraction(
+    project_root: Path | None = None,
+    *,
+    mediapipe_delegate: str | None = None,
+    mediapipe_fallback_to_cpu: bool | None = None,
+) -> FeatureExtractionArtifacts:
     root = (project_root or Path.cwd()).resolve()
     configs = load_named_configs(root / "configs")
     features_config = configs["features"]["features"]
@@ -179,6 +315,15 @@ def run_feature_extraction(project_root: Path | None = None) -> FeatureExtractio
     ).resolve()
     feature_audit_path = (
         root / str(features_config.get("feature_audit_path", "reports/metrics/feature_audit.json"))
+    ).resolve()
+    expanded_feature_summary_path = (
+        root / str(features_config.get("expanded_feature_summary_path", "reports/metrics/expanded_feature_summary.json"))
+    ).resolve()
+    feature_missingness_path = (
+        root / str(features_config.get("feature_missingness_path", "reports/metrics/feature_missingness.json"))
+    ).resolve()
+    feature_reliability_audit_path = (
+        root / str(features_config.get("feature_reliability_audit_path", "reports/metrics/feature_reliability_audit.json"))
     ).resolve()
     three_d_config = dict(features_config.get("three_d", {}))
     three_d_enabled = bool(three_d_config.get("enabled", False))
@@ -238,6 +383,18 @@ def run_feature_extraction(project_root: Path | None = None) -> FeatureExtractio
 
     embedder, auxiliary_embedding_reason = _build_embedder_if_available(features_config, root)
     auxiliary_rows: list[dict[str, Any]] = []
+    mediapipe_config = dict(
+        configs.get("landmarks", {}).get("landmarks", {}).get("landmark_sources", {}).get("mediapipe_face_mesh", {})
+    )
+    if mediapipe_delegate is not None:
+        mediapipe_config["delegate"] = str(mediapipe_delegate)
+    if mediapipe_fallback_to_cpu is not None:
+        mediapipe_config["fallback_to_cpu"] = bool(mediapipe_fallback_to_cpu)
+    capability_report_written = {
+        "capability_report_path": None,
+        "mediapipe_runtime_diagnostics_path": None,
+        "mediapipe_debug_landmarks_path": None,
+    }
     three_d_manifest_lookup = (
         _load_3d_manifest_lookup(three_d_input_manifest_path)
         if three_d_input_manifest_path is not None
@@ -254,11 +411,34 @@ def run_feature_extraction(project_root: Path | None = None) -> FeatureExtractio
         landmarks = parse_json_field(row.get("landmarks"))
         landmarks_dense = parse_json_field(row.get("landmarks_dense"))
         bbox = parse_json_field(row.get("bbox"))
+        image_path = Path(str(row.get("image_path", "")))
+        resolved_image_path = image_path if image_path.is_absolute() else (root / image_path).resolve()
+        mediapipe_landmarks = None
+        if resolved_image_path.exists():
+            image_bgr = load_image(resolved_image_path)
+            mediapipe_result = build_mediapipe_source_result(
+                image_bgr=image_bgr,
+                config=mediapipe_config,
+                project_root=root,
+            )
+            if mediapipe_result.available and mediapipe_result.landmarks:
+                mediapipe_landmarks = mediapipe_result.landmarks
 
-        raw_measurements = extract_raw_measurements(landmarks=landmarks, bbox=bbox, landmarks_dense=landmarks_dense)
+        raw_measurements = extract_raw_measurements(
+            landmarks=landmarks,
+            bbox=bbox,
+            landmarks_dense=landmarks_dense,
+            mediapipe_landmarks=mediapipe_landmarks,
+        )
         normalized_measurements = extract_normalized_measurements(raw_measurements)
         symmetry_features = extract_symmetry_features(raw_measurements, normalized_measurements)
-        angle_features = extract_angle_features(landmarks=landmarks, row=row, landmarks_dense=landmarks_dense, bbox=bbox)
+        angle_features = extract_angle_features(
+            landmarks=landmarks,
+            row=row,
+            landmarks_dense=landmarks_dense,
+            bbox=bbox,
+            mediapipe_landmarks=mediapipe_landmarks,
+        )
 
         validate_feature_values(raw_measurements, image_id=row["image_id"])
         validate_feature_values(normalized_measurements, image_id=row["image_id"])
@@ -308,6 +488,24 @@ def run_feature_extraction(project_root: Path | None = None) -> FeatureExtractio
                 }
             )
 
+    sample_landmarks_dense = parse_json_field(eligible_rows[0].get("landmarks_dense")) if eligible_rows else None
+    sample_image = None
+    if eligible_rows:
+        sample_image_path = Path(str(eligible_rows[0].get("image_path")))
+        resolved_sample_image_path = sample_image_path if sample_image_path.is_absolute() else (root / sample_image_path).resolve()
+        if resolved_sample_image_path.exists():
+            sample_image = load_image(resolved_sample_image_path)
+    capability_report = build_landmark_capability_report(
+        project_root=root,
+        image_bgr=sample_image,
+        landmarks_dense=sample_landmarks_dense,
+    )
+    capability_report_written = write_landmark_capability_artifacts(
+        project_root=root,
+        capability_report=capability_report,
+        image_bgr=sample_image,
+    )
+
     write_parquet(raw_rows, measurements_raw_path, BASE_COLUMNS + RAW_MEASUREMENT_COLUMNS)
     write_parquet(
         normalized_rows,
@@ -347,8 +545,23 @@ def run_feature_extraction(project_root: Path | None = None) -> FeatureExtractio
 
     registry_rows = feature_registry_rows()
     feature_audit = feature_audit_payload()
+    expanded_feature_summary, feature_missingness, feature_reliability_audit = _feature_statistics_payload(
+        geometry_rows,
+        registry_rows,
+    )
     write_json(registry_rows, feature_registry_path)
     write_json(feature_audit, feature_audit_path)
+    write_json(expanded_feature_summary, expanded_feature_summary_path)
+    write_json(feature_missingness, feature_missingness_path)
+    write_json(feature_reliability_audit, feature_reliability_audit_path)
+
+    rows_with_group_labels = sum(
+        1
+        for row in geometry_rows
+        if _is_nonempty(row.get("sex_group_normalized"))
+        or _is_nonempty(row.get("age_group_normalized"))
+        or _is_nonempty(row.get("ethnicity_group_normalized"))
+    )
 
     summary = {
         "input_rows": len(manifest_rows),
@@ -370,6 +583,22 @@ def run_feature_extraction(project_root: Path | None = None) -> FeatureExtractio
         "feature_registry_path": str(feature_registry_path),
         "feature_audit_path": str(feature_audit_path),
         "feature_registry_count": len(registry_rows),
+        "expanded_feature_summary_path": str(expanded_feature_summary_path),
+        "feature_missingness_path": str(feature_missingness_path),
+        "feature_reliability_audit_path": str(feature_reliability_audit_path),
+        "rows_with_group_labels": rows_with_group_labels,
+        "landmark_capability_report_path": capability_report_written["capability_report_path"],
+        "mediapipe_runtime_diagnostics_path": capability_report_written["mediapipe_runtime_diagnostics_path"],
+        "mediapipe_debug_landmarks_path": capability_report_written["mediapipe_debug_landmarks_path"],
+        "available_group_label_columns": [
+            column
+            for column in (
+                "sex_group_normalized",
+                "age_group_normalized",
+                "ethnicity_group_normalized",
+            )
+            if any(_is_nonempty(row.get(column)) for row in geometry_rows)
+        ],
         "three_d_enabled": three_d_enabled,
         "three_d_processed_rows": three_d_processed_rows,
         "three_d_success_rows": three_d_success_rows,

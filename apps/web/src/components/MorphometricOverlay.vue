@@ -76,41 +76,17 @@
             </template>
           </g>
 
-          <g v-if="layers.landmarks">
-            <template v-for="point in visibleNamedPoints" :key="point.name">
-              <circle
-                class="overlay-point"
-                :class="point.className"
-                :cx="point.point.x"
-                :cy="point.point.y"
-                :r="overlaySizes.pointRadius"
-                :style="pointStyle"
-              >
-                <title>{{ point.label }}</title>
-              </circle>
-              <text
-                v-if="layers.labels"
-                class="overlay-label overlay-label--point"
-                :x="point.point.x + overlaySizes.pointLabelOffset"
-                :y="point.point.y - overlaySizes.pointLabelOffset"
-                :style="labelTextStyle"
-              >
-                {{ point.label }}
-              </text>
-            </template>
-          </g>
 
-          <g v-if="layers.debugMode && layers.allLandmarks">
-            <template v-for="landmark in denseLandmarks" :key="`debug-${landmark.index}`">
+          <g v-if="layers.debugMode && layers.mediapipePoints">
+            <template v-for="landmark in mediapipeLandmarks" :key="`debug-mediapipe-${landmark.index}`">
               <circle
-                class="overlay-point overlay-point--debug"
-                :class="`overlay-point--${String(landmark.group ?? 'misc').replace(/_/g, '-')}`"
+                class="overlay-point overlay-point--debug overlay-point--mediapipe"
                 :cx="landmark.x"
                 :cy="landmark.y"
                 :r="overlaySizes.debugPointRadius"
                 :style="debugPointStyle"
               >
-                <title>{{ `#${landmark.index}${landmark.name ? ` ${landmark.name}` : ""}` }}</title>
+                <title>{{ `#${landmark.index}` }}</title>
               </circle>
               <text
                 v-if="layers.landmarkIndices"
@@ -121,6 +97,17 @@
               >
                 {{ landmark.index }}
               </text>
+            </template>
+          </g>
+          <g v-if="visibleMediapipePolylines.length">
+            <template v-for="region in visibleMediapipePolylines" :key="`mp-region-${region.name}`">
+              <polyline
+                class="overlay-mediapipe-region"
+                :class="`overlay-mediapipe-region--${region.className}`"
+                :points="region.points"
+              >
+                <title>{{ region.name }}</title>
+              </polyline>
             </template>
           </g>
         </svg>
@@ -167,23 +154,32 @@ import type {
 } from "../types/api";
 import { formatLabel, formatNumber } from "../utils/format";
 import type { Locale } from "../utils/i18n";
-import { pointGroupMatches, segmentLayerVisible } from "../utils/overlayVisibility.js";
-import { getMeasurementOverlaySegments, getRawLandmarks, getSemanticPoints } from "../utils/visualizationPayload.js";
+import { segmentLayerVisible } from "../utils/overlayVisibility.js";
+import {
+  getDisplayFaceBox,
+  getMediapipeLandmarks,
+  getMediapipeRegions,
+  getMeasurementOverlaySegments,
+  getSemanticPoints,
+} from "../utils/visualizationPayload.js";
 import MetricLabel from "./MetricLabel.vue";
 
 type ToggleKey =
   | "bbox"
-  | "landmarks"
+  | "mediapipePoints"
+  | "faceOval"
   | "eyes"
+  | "brows"
   | "nose"
   | "mouth"
+  | "cheekbones"
   | "chinJaw"
   | "symmetry"
+  | "symmetryAxes"
   | "thirds"
   | "angles"
   | "measurements"
   | "debugMode"
-  | "allLandmarks"
   | "landmarkIndices"
   | "labels";
 
@@ -197,14 +193,6 @@ type OverlaySegment = {
   className: string;
   labelClassName: string;
   supportedFeatures: string[];
-};
-
-type NamedPointEntry = {
-  name: string;
-  point: Point2DResponse;
-  label: string;
-  className: string;
-  group: string;
 };
 
 type HighlightItem = {
@@ -222,17 +210,20 @@ const props = defineProps<{
 
 const layers = reactive<Record<ToggleKey, boolean>>({
   bbox: true,
-  landmarks: true,
+  mediapipePoints: false,
+  faceOval: true,
   eyes: true,
+  brows: true,
   nose: true,
   mouth: true,
+  cheekbones: true,
   chinJaw: true,
   symmetry: true,
+  symmetryAxes: true,
   thirds: true,
   angles: true,
   measurements: true,
   debugMode: false,
-  allLandmarks: false,
   landmarkIndices: false,
   labels: false,
 });
@@ -240,17 +231,20 @@ const layers = reactive<Record<ToggleKey, boolean>>({
 const overlayMessages = {
   en: {
     toggleBbox: "BBox",
-    toggleLandmarks: "Landmarks",
+    toggleMediapipePoints: "MediaPipe dense points",
+    toggleFaceOval: "Face oval",
     toggleEyes: "Eyes",
+    toggleBrows: "Brows",
     toggleNose: "Nose",
     toggleMouth: "Mouth",
+    toggleCheekbones: "Cheekbones",
     toggleChinJaw: "Chin / jaw",
     toggleSymmetry: "Symmetry",
+    toggleSymmetryAxes: "Symmetry axes",
     toggleThirds: "Thirds",
     toggleAngles: "Angles",
     toggleMeasurements: "Measurements",
     toggleDebugMode: "Debug mode",
-    toggleAllLandmarks: "All landmarks",
     toggleLandmarkIndices: "Landmark indices",
     toggleLabels: "Labels",
     placeholderNoImageTitle: "Upload an image to see the overlay",
@@ -262,28 +256,31 @@ const overlayMessages = {
     notesTitle: "Overlay notes",
     imageAlt: "Morphometric overlay preview",
     legendTitle: "Legend",
-    bboxLegend: "Detected face bounding box",
+    bboxLegend: "Semantic face box",
     measurementLegend: "Primary distances and width / height segments",
     symmetryLegend: "Midline and left/right asymmetry distances",
     thirdsLegend: "Vertical thirds and proportion guides",
     angleLegend: "Axes and angular direction lines",
-    landmarkLegend: "Named anchor and derived points",
+    landmarkLegend: "MediaPipe dense landmark points",
     highlightTitle: "Top visualizable deviations",
     highlightEmpty: "Current top deviations are either non-visualizable from 2D coordinates or not available.",
   },
   ru: {
     toggleBbox: "BBox",
-    toggleLandmarks: "Landmarks",
+    toggleMediapipePoints: "Dense точки MediaPipe",
+    toggleFaceOval: "Овал лица",
     toggleEyes: "Глаза",
+    toggleBrows: "Брови",
     toggleNose: "Нос",
     toggleMouth: "Рот",
+    toggleCheekbones: "Скулы",
     toggleChinJaw: "Подбородок / челюсть",
     toggleSymmetry: "Симметрия",
+    toggleSymmetryAxes: "Оси симметрии",
     toggleThirds: "Трети",
     toggleAngles: "Углы",
     toggleMeasurements: "Измерения",
     toggleDebugMode: "Debug режим",
-    toggleAllLandmarks: "Все landmarks",
     toggleLandmarkIndices: "Индексы landmarks",
     toggleLabels: "Подписи",
     placeholderNoImageTitle: "Загрузите изображение, чтобы увидеть overlay",
@@ -295,12 +292,12 @@ const overlayMessages = {
     notesTitle: "Примечания overlay",
     imageAlt: "Предпросмотр морфометрического overlay",
     legendTitle: "Легенда",
-    bboxLegend: "Рамка обнаруженного лица",
+    bboxLegend: "Семантическая рамка лица",
     measurementLegend: "Основные расстояния и ширины / высоты сегментов",
     symmetryLegend: "Midline и линии лево/правой асимметрии",
     thirdsLegend: "Вертикальные трети и направляющие пропорций",
     angleLegend: "Оси и угловые направляющие линии",
-    landmarkLegend: "Именованные опорные и производные точки",
+    landmarkLegend: "Dense landmarks MediaPipe",
     highlightTitle: "Главные визуализируемые отклонения",
     highlightEmpty: "Текущие top deviations либо не визуализируются по 2D координатам, либо отсутствуют.",
   },
@@ -309,10 +306,15 @@ const overlayMessages = {
 const copy = computed(() => overlayMessages[props.locale]);
 const visualization = computed(() => props.report?.visualization ?? null);
 const imageSize = computed(() => visualization.value?.image_size ?? null);
-const bbox = computed<number[] | null>(() => visualization.value?.bbox ?? props.report?.input_quality.detection.bbox ?? null);
+const bbox = computed<number[] | null>(
+  () => getDisplayFaceBox(visualization.value, props.report?.input_quality.detection.bbox ?? null),
+);
 const visualizationNotes = computed(() => visualization.value?.notes ?? []);
-const denseLandmarks = computed<LandmarkPointResponse[]>(
-  () => getRawLandmarks(visualization.value),
+const mediapipeLandmarks = computed<LandmarkPointResponse[]>(
+  () => getMediapipeLandmarks(visualization.value),
+);
+const mediapipeRegions = computed<Record<string, number[]>>(
+  () => getMediapipeRegions(visualization.value),
 );
 const overlayScale = computed(() => {
   const size = imageSize.value;
@@ -336,9 +338,56 @@ const overlaySizes = computed(() => ({
   guideLabelOffset: Number((9.0 * overlayScale.value).toFixed(2)),
   angleLabelOffset: Number((10.0 * overlayScale.value).toFixed(2)),
 }));
-const pointStyle = computed(() => ({
-  strokeWidth: overlaySizes.value.pointStrokeWidth,
-}));
+
+const mediapipeLandmarkMap = computed<Map<number, LandmarkPointResponse>>(() => {
+  const entries = mediapipeLandmarks.value.map((item) => [item.index, item] as const);
+  return new Map(entries);
+});
+
+const visibleMediapipePolylines = computed<Array<{ name: string; className: string; points: string }>>(() => {
+  const regions = mediapipeRegions.value;
+  if (!regions || !Object.keys(regions).length) {
+    return [];
+  }
+  const regionSpecs = [
+    { key: "dense_face_oval", toggle: "faceOval", className: "face-oval", closed: true },
+    { key: "dense_eyes", toggle: "eyes", className: "eyes", closed: false },
+    { key: "dense_brows", toggle: "brows", className: "brows", closed: false },
+    { key: "dense_nose", toggle: "nose", className: "nose", closed: false },
+    { key: "dense_lips", toggle: "mouth", className: "mouth", closed: true },
+    { key: "approximate_cheeks", toggle: "cheekbones", className: "cheekbones", closed: false },
+  ] as const;
+  const result: Array<{ name: string; className: string; points: string }> = [];
+  for (const spec of regionSpecs) {
+    if (!layers[spec.toggle]) {
+      continue;
+    }
+    const indices = regions[spec.key];
+    if (!Array.isArray(indices) || !indices.length) {
+      continue;
+    }
+    const points: string[] = [];
+    for (const index of indices) {
+      const landmark = mediapipeLandmarkMap.value.get(index);
+      if (!landmark) {
+        continue;
+      }
+      points.push(`${landmark.x},${landmark.y}`);
+    }
+    if (points.length < 2) {
+      continue;
+    }
+    if (spec.closed) {
+      points.push(points[0]);
+    }
+    result.push({
+      name: spec.key,
+      className: spec.className,
+      points: points.join(" "),
+    });
+  }
+  return result;
+});
 const debugPointStyle = computed(() => ({
   strokeWidth: overlaySizes.value.debugPointStrokeWidth,
 }));
@@ -353,17 +402,20 @@ const debugLabelTextStyle = computed(() => ({
 
 const toggleList = computed(() => [
   { key: "bbox" as const, label: copy.value.toggleBbox, helpKey: "toggle.bbox" },
-  { key: "landmarks" as const, label: copy.value.toggleLandmarks, helpKey: "toggle.landmarks" },
+  { key: "mediapipePoints" as const, label: copy.value.toggleMediapipePoints, helpKey: "toggle.mediapipe_points" },
+  { key: "faceOval" as const, label: copy.value.toggleFaceOval, helpKey: "toggle.face_oval" },
   { key: "eyes" as const, label: copy.value.toggleEyes, helpKey: "toggle.eyes" },
+  { key: "brows" as const, label: copy.value.toggleBrows, helpKey: "toggle.brows" },
   { key: "nose" as const, label: copy.value.toggleNose, helpKey: "toggle.nose" },
   { key: "mouth" as const, label: copy.value.toggleMouth, helpKey: "toggle.mouth" },
+  { key: "cheekbones" as const, label: copy.value.toggleCheekbones, helpKey: "toggle.cheekbones" },
   { key: "chinJaw" as const, label: copy.value.toggleChinJaw, helpKey: "toggle.chin_jaw" },
   { key: "symmetry" as const, label: copy.value.toggleSymmetry, helpKey: "toggle.symmetry" },
+  { key: "symmetryAxes" as const, label: copy.value.toggleSymmetryAxes, helpKey: "toggle.symmetry_axes" },
   { key: "thirds" as const, label: copy.value.toggleThirds, helpKey: "toggle.thirds" },
   { key: "angles" as const, label: copy.value.toggleAngles, helpKey: "toggle.angles" },
   { key: "measurements" as const, label: copy.value.toggleMeasurements, helpKey: "toggle.raw_measurements" },
   { key: "debugMode" as const, label: copy.value.toggleDebugMode, helpKey: "toggle.debug_mode" },
-  { key: "allLandmarks" as const, label: copy.value.toggleAllLandmarks, helpKey: "toggle.all_landmarks" },
   { key: "landmarkIndices" as const, label: copy.value.toggleLandmarkIndices, helpKey: "toggle.debug_indices" },
   { key: "labels" as const, label: copy.value.toggleLabels, helpKey: "toggle.labels" },
 ]);
@@ -393,65 +445,12 @@ const semanticWarning = computed(() => {
     : "Semantic landmark validation failed; dependent measurements are marked as unreliable.";
 });
 
-const allPoints = computed<Record<string, Point2DResponse>>(() => (
-  getSemanticPoints(visualization.value)
-));
-
-const pointGroups = computed<Record<string, string>>(() => {
-  const groups = visualization.value?.groups ?? {};
-  const result: Record<string, string> = {};
-  for (const [groupName, members] of Object.entries(groups)) {
-    for (const member of members) {
-      result[member] = groupName;
-    }
+const allPoints = computed<Record<string, Point2DResponse>>(() => {
+  const named = visualization.value?.named_points;
+  if (named && typeof named === "object") {
+    return named as Record<string, Point2DResponse>;
   }
-  return result;
-});
-
-function pointDisplayName(name: string): string {
-  const englishMap: Record<string, string> = {
-    left_eye_center: "Left eye",
-    right_eye_center: "Right eye",
-    nose_tip: "Nose tip",
-    nose_base_center: "Nose base",
-    mouth_left: "Left mouth",
-    mouth_right: "Right mouth",
-    mouth_center: "Mouth center",
-    chin_center: "Chin center",
-    brow_left: "Left brow",
-    brow_right: "Right brow",
-    brow_center: "Brow center",
-    jaw_left: "Left jaw",
-    jaw_right: "Right jaw",
-    cheekbone_left: "Left cheekbone",
-    cheekbone_right: "Right cheekbone",
-  };
-  return props.locale === "ru" ? formatLabel(name) : (englishMap[name] ?? formatLabel(name));
-}
-
-const visibleNamedPoints = computed<NamedPointEntry[]>(() => {
-  const names = Object.keys(
-    visualization.value?.semantic_points ?? {},
-  );
-  return names
-    .map((name) => {
-      const point = allPoints.value[name];
-      if (!point) {
-        return null;
-      }
-      const group = pointGroups.value[name] ?? "misc";
-      if (!pointGroupMatches(group, layers)) {
-        return null;
-      }
-      return {
-        name,
-        point,
-        label: pointDisplayName(name),
-        className: `overlay-point--${group.replace(/_/g, "-")}`,
-        group,
-      };
-    })
-    .filter((item): item is NamedPointEntry => Boolean(item));
+  return getSemanticPoints(visualization.value);
 });
 
 const bboxRect = computed(() => {
@@ -554,6 +553,9 @@ function buildSegments(source: VisualizationLineResponse[] | undefined): Overlay
         return null;
       }
       if (!segmentLayerVisible(segment, layers)) {
+        return null;
+      }
+      if ((segment.kind === "axis" || segment.group === "symmetry") && !layers.symmetryAxes) {
         return null;
       }
       const labelOffset = segment.kind === "guide"

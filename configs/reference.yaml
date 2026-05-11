@@ -1,0 +1,21 @@
+{
+  "reference": {
+    "reference_source": "fairface_utkface",
+    "reference_datasets": ["fairface", "utkface"],
+    "reference_features_path": "data/reference/reference_features.parquet",
+    "reference_manifest_path": "data/reference/reference_manifest.parquet",
+    "reference_dataset_summary_path": "reports/metrics/reference_dataset_summary.json",
+    "reference_group_statistics_path": "models/reference/reference_group_statistics.parquet",
+    "reference_group_coverage_path": "reports/metrics/reference_group_coverage.json",
+    "reference_feature_statistics_summary_path": "reports/metrics/reference_feature_statistics_summary.json",
+    "reference_stats_report_dir": "reports/metrics",
+    "use_fairface_reference": true,
+    "min_subset_size": 25,
+    "filters": {
+      "sex_group_normalized": null,
+      "age_group_normalized": null,
+      "ethnicity_group_normalized": null
+    },
+    "feature_types": ["z", "dir", "ratio", "absdev", "percentile"]
+  }
+}

@@ -9,18 +9,8 @@ from typing import Any
 
 import cv2
 import numpy as np
-from insightface.app.common import Face
 from src.face_aesthetics.features.extraction import derive_semantic_landmark_bundle
-from src.face_aesthetics.landmarks.insightface_106 import (
-    LEFT_EYE_INDICES,
-    MOUTH_LEFT_CORNER_INDEX,
-    MOUTH_RIGHT_CORNER_INDEX,
-    NOSE_TIP_INDEX,
-    RIGHT_EYE_INDICES,
-    has_106_landmarks,
-    point_for_index,
-    points_for_indices,
-)
+from src.face_aesthetics.landmarks.mediapipe_source import build_mediapipe_source_result
 
 
 POSE_MODEL_POINTS_5 = np.array(
@@ -41,6 +31,11 @@ CUDA_RUNTIME_LIBRARIES = (
     "libcudnn.so",
     "libcudart.so",
 )
+MEDIAPIPE_LEFT_EYE_ANCHORS = [33, 133, 159, 145]
+MEDIAPIPE_RIGHT_EYE_ANCHORS = [362, 263, 386, 374]
+MEDIAPIPE_NOSE_TIP_INDEX = 1
+MEDIAPIPE_MOUTH_LEFT_INDEX = 61
+MEDIAPIPE_MOUTH_RIGHT_INDEX = 291
 
 
 def _wrap_signed_angle(angle_deg: float) -> float:
@@ -292,16 +287,15 @@ def _extract_eye_and_nose_from_dense_landmarks(
     bbox: list[float],
     detector_landmarks: list[list[float]] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    if has_106_landmarks(points):
-        left_eye_indices, left_eye_points = points_for_indices(points, LEFT_EYE_INDICES)
-        right_eye_indices, right_eye_points = points_for_indices(points, RIGHT_EYE_INDICES)
-        nose_tip = point_for_index(points, NOSE_TIP_INDEX)
-        if len(left_eye_points) > 0 and len(right_eye_points) > 0 and nose_tip is not None:
-            return (
-                np.asarray(left_eye_points.mean(axis=0), dtype=np.float32),
-                np.asarray(right_eye_points.mean(axis=0), dtype=np.float32),
-                np.asarray(nose_tip, dtype=np.float32),
-            )
+    if len(points) >= 400:
+        left_eye_points = np.asarray([points[index] for index in MEDIAPIPE_LEFT_EYE_ANCHORS], dtype=np.float32)
+        right_eye_points = np.asarray([points[index] for index in MEDIAPIPE_RIGHT_EYE_ANCHORS], dtype=np.float32)
+        nose_tip = np.asarray(points[MEDIAPIPE_NOSE_TIP_INDEX], dtype=np.float32)
+        return (
+            np.asarray(left_eye_points.mean(axis=0), dtype=np.float32),
+            np.asarray(right_eye_points.mean(axis=0), dtype=np.float32),
+            nose_tip,
+        )
 
     if detector_landmarks and len(detector_landmarks) >= 3:
         detector_points = np.asarray(detector_landmarks, dtype=np.float32)
@@ -363,10 +357,10 @@ def _extract_mouth_corners_from_dense_landmarks(
     face_width = max(float(x2 - x1), 1.0)
     face_height = max(float(y2 - y1), 1.0)
 
-    if has_106_landmarks(points):
+    if len(points) >= 400:
         return (
-            np.asarray(points[MOUTH_LEFT_CORNER_INDEX], dtype=np.float32),
-            np.asarray(points[MOUTH_RIGHT_CORNER_INDEX], dtype=np.float32),
+            np.asarray(points[MEDIAPIPE_MOUTH_LEFT_INDEX], dtype=np.float32),
+            np.asarray(points[MEDIAPIPE_MOUTH_RIGHT_INDEX], dtype=np.float32),
         )
 
     mouth_band_low = max(float(nose_y + 0.08 * face_height), float(y1 + 0.58 * face_height))
@@ -574,7 +568,7 @@ def _alignment_helped_quality(
     return len(aligned_quality_reasons) < len(original_quality_reasons)
 
 
-def _resolve_insightface_model_dir(model_name: str, model_root: Path) -> Path:
+def _resolve_model_bundle_dir(model_name: str, model_root: Path) -> Path:
     candidate_dirs = [
         model_root / "models" / model_name,
         model_root / model_name,
@@ -585,25 +579,25 @@ def _resolve_insightface_model_dir(model_name: str, model_root: Path) -> Path:
 
     expected = candidate_dirs[0]
     raise FileNotFoundError(
-        "InsightFace model bundle was not found. "
+        "Model bundle was not found. "
         f"Expected local files under {expected}. "
         f"Copy the '{model_name}' bundle to that directory before running preprocessing."
     )
 
 
-def _validate_insightface_model_dir(
+def _validate_model_bundle_dir(
     model_name: str,
     model_root: Path,
     required_model_files: list[str] | None,
 ) -> Path:
-    model_dir = _resolve_insightface_model_dir(model_name, model_root)
+    model_dir = _resolve_model_bundle_dir(model_name, model_root)
     required_patterns = required_model_files or ["*.onnx"]
     missing_patterns = [
         pattern for pattern in required_patterns if not list(model_dir.glob(pattern))
     ]
     if missing_patterns:
         raise FileNotFoundError(
-            "InsightFace model bundle is incomplete. "
+            "Model bundle is incomplete. "
             f"Missing files matching {missing_patterns} under {model_dir}. "
             f"Copy the full '{model_name}' bundle to the local model root before running preprocessing."
         )
@@ -741,7 +735,7 @@ def _finalize_provider_diagnostics(diagnostics: ProviderDiagnostics) -> Provider
         diagnostics.fallback_to_cpu = True
         diagnostics.fallback_reason = (
             diagnostics.fallback_reason
-            or "All loaded InsightFace models resolved to CPUExecutionProvider. "
+            or "All loaded models resolved to CPUExecutionProvider. "
             "This usually means the preferred GPU provider is installed but its CUDA runtime dependencies are unavailable."
         )
         diagnostics.selected_execution_provider = "CPUExecutionProvider"
@@ -796,202 +790,78 @@ def run_gpu_runtime_check(
     return payload
 
 
-class InsightFaceDetector:
+class MediaPipeDetector:
     def __init__(
         self,
-        model_name: str,
-        model_root: Path,
-        providers: list[str],
-        ctx_id: int,
-        det_size: list[int],
-        device_id: int,
-        preferred_execution_provider: str,
-        fallback_execution_provider: str,
-        strict_gpu_mode: bool,
-        allowed_modules: list[str] | None = None,
-        required_model_files: list[str] | None = None,
-        fallback_detector_enabled: bool = False,
-        fallback_detector_scale_factor: float = 1.1,
-        fallback_detector_min_neighbors: int = 3,
-        fallback_detector_min_size: int = 30,
+        mediapipe_config: dict[str, Any],
+        project_root: Path,
+        target_image_size: list[int] | None = None,
     ) -> None:
-        try:
-            from insightface.app import FaceAnalysis
-            from insightface.utils import face_align
-        except ModuleNotFoundError as exc:
-            raise RuntimeError(
-                "InsightFace is not available in the active Python environment."
-            ) from exc
-
-        self.model_dir = _validate_insightface_model_dir(
-            model_name=model_name,
-            model_root=model_root,
-            required_model_files=required_model_files,
+        self._config = dict(mediapipe_config)
+        self._project_root = project_root
+        self._target_image_size = int((target_image_size or [224])[0])
+        self.provider_diagnostics = ProviderDiagnostics(
+            onnxruntime_version="n/a",
+            preload_dlls_supported=False,
+            preload_dlls_success=False,
+            preload_dlls_error=None,
+            cuda_runtime_libraries={},
+            missing_cuda_runtime_libraries=[],
+            available_providers=[],
+            preferred_execution_provider="mediapipe",
+            requested_providers=["mediapipe"],
+            selected_execution_provider="mediapipe",
+            fallback_to_cpu=False,
+            fallback_reason=None,
+            device_id=0,
+            actual_model_providers={},
+            strict_gpu_mode=False,
         )
-        self.requested_providers, self.provider_diagnostics = collect_onnxruntime_runtime_diagnostics(
-            preferred_execution_provider=preferred_execution_provider,
-            fallback_execution_provider=fallback_execution_provider,
-            device_id=device_id,
-            strict_gpu_mode=strict_gpu_mode,
-        )
-        self._face_align = face_align
-        self._fallback_detector_enabled = fallback_detector_enabled
-        self._fallback_scale_factor = float(fallback_detector_scale_factor)
-        self._fallback_min_neighbors = int(fallback_detector_min_neighbors)
-        self._fallback_min_size = int(fallback_detector_min_size)
-        self._haar = (
-            cv2.CascadeClassifier(cv2.data.haarcascades + "haarcascade_frontalface_default.xml")
-            if fallback_detector_enabled
-            else None
-        )
-        try:
-            self._app = FaceAnalysis(
-                name=model_name,
-                root=str(model_root),
-                providers=self.requested_providers or providers,
-                allowed_modules=allowed_modules,
-            )
-            self._app.prepare(ctx_id=ctx_id, det_size=tuple(det_size))
-            self.provider_diagnostics.actual_model_providers = _extract_model_provider_map(self._app)
-            self.provider_diagnostics = _finalize_provider_diagnostics(self.provider_diagnostics)
-            self._landmarker = self._app.models.get("landmark_2d_106")
-            if (
-                strict_gpu_mode
-                and self.provider_diagnostics.preferred_execution_provider == "CUDAExecutionProvider"
-                and self.provider_diagnostics.selected_execution_provider != "CUDAExecutionProvider"
-            ):
-                missing = self.provider_diagnostics.missing_cuda_runtime_libraries
-                raise RuntimeError(
-                    "Strict GPU mode is enabled, but CUDAExecutionProvider did not initialize for InsightFace models. "
-                    f"Selected provider: {self.provider_diagnostics.selected_execution_provider}. "
-                    f"Missing CUDA libraries: {missing}."
-                )
-        except Exception as exc:
-            raise RuntimeError(
-                "Failed to initialize InsightFace FaceAnalysis with local models. "
-                f"Model name: {model_name}. "
-                f"Model root: {model_root}. "
-                f"Resolved bundle dir: {self.model_dir}. "
-                f"Requested providers: {self.requested_providers}. "
-                f"Provider diagnostics: {self.provider_diagnostics}. "
-                "Verify that the local model bundle is complete and compatible with the installed insightface package."
-            ) from exc
 
     def diagnostics_payload(self) -> dict[str, Any]:
         return asdict(self.provider_diagnostics)
 
-    def _fallback_detect(self, image_bgr: np.ndarray, target_image_size: list[int]) -> DetectedFace | None:
-        if not self._fallback_detector_enabled or self._haar is None or self._landmarker is None:
-            return None
-
-        gray = cv2.cvtColor(image_bgr, cv2.COLOR_BGR2GRAY)
-        boxes = self._haar.detectMultiScale(
-            gray,
-            scaleFactor=self._fallback_scale_factor,
-            minNeighbors=self._fallback_min_neighbors,
-            minSize=(self._fallback_min_size, self._fallback_min_size),
-        )
-        bbox_array = _largest_bbox(boxes)
-        if bbox_array is None:
-            return None
-
-        face = Face(bbox=bbox_array, det_score=1.0)
-        dense = self._landmarker.get(image_bgr, face)
-        dense_points = np.asarray(dense, dtype=np.float32)
-        bbox = [float(value) for value in bbox_array.tolist()]
-        landmarks_five = _derive_five_point_landmarks(dense_points.tolist(), bbox)
-
-        aligned: np.ndarray | None = None
-        try:
-            aligned = self._face_align.norm_crop(
-                image_bgr,
-                landmark=np.asarray(landmarks_five, dtype=np.float32),
-                image_size=int(target_image_size[0]),
-            )
-        except Exception:
-            aligned = _crop_and_resize(image_bgr, bbox, int(target_image_size[0]))
-        yaw, pitch, roll = estimate_pose_from_landmarks(image_bgr.shape, landmarks_five)
-
-        return DetectedFace(
-            bbox=bbox,
-            landmarks=landmarks_five,
-            landmarks_dense=[[float(x), float(y)] for x, y in dense_points.tolist()],
-            det_score=1.0,
-            aligned_image=aligned,
-            yaw=yaw,
-            pitch=pitch,
-            roll=roll,
-            occlusion_score=None,
-            detection_backend="opencv_haar+insightface_lmk106",
-        )
-
     def detect(self, image_bgr: np.ndarray, target_image_size: list[int]) -> list[DetectedFace]:
-        faces = self._app.get(image_bgr)
-        if not faces:
-            fallback_face = self._fallback_detect(image_bgr, target_image_size)
-            return [fallback_face] if fallback_face is not None else []
+        source_result = build_mediapipe_source_result(
+            image_bgr=image_bgr,
+            config=self._config,
+            project_root=self._project_root,
+        )
+        if not source_result.available or not source_result.landmarks:
+            return []
 
-        detections: list[DetectedFace] = []
+        dense_landmarks = [[float(point[0]), float(point[1])] for point in source_result.landmarks]
+        landmarks = _derive_five_point_landmarks(dense_landmarks, _bbox_from_points(dense_landmarks))
+        bbox = _bbox_from_points(dense_landmarks)
+        aligned = _crop_and_resize(image_bgr, bbox, int(target_image_size[0]) if target_image_size else self._target_image_size)
+        yaw, pitch, roll = estimate_pose_from_landmarks(image_bgr.shape, landmarks)
+        return [
+            DetectedFace(
+                bbox=bbox,
+                landmarks=[[float(x), float(y)] for x, y in landmarks],
+                landmarks_dense=dense_landmarks,
+                det_score=float(source_result.confidence) if source_result.confidence is not None else None,
+                aligned_image=aligned,
+                yaw=yaw,
+                pitch=pitch,
+                roll=roll,
+                occlusion_score=None,
+                detection_backend="mediapipe_face_landmarker",
+            )
+        ]
 
-        for face in faces:
-            bbox = [float(value) for value in np.asarray(face.bbox).tolist()]
-            detector_landmarks = (
-                np.asarray(face.kps, dtype=np.float32).tolist()
-                if getattr(face, "kps", None) is not None
-                else []
-            )
-            dense_landmarks_attr = getattr(face, "landmark_2d_106", None)
-            dense_landmarks = (
-                np.asarray(dense_landmarks_attr, dtype=np.float32).tolist()
-                if dense_landmarks_attr is not None
-                else detector_landmarks
-            )
-            landmarks = (
-                _derive_five_point_landmarks(
-                    dense_landmarks,
-                    bbox,
-                    detector_landmarks=detector_landmarks,
-                )
-                if dense_landmarks
-                else []
-            )
-            aligned: np.ndarray | None = None
-            if len(landmarks) >= 5:
-                try:
-                    aligned = self._face_align.norm_crop(
-                        image_bgr,
-                        landmark=np.asarray(landmarks, dtype=np.float32),
-                        image_size=int(target_image_size[0]),
-                    )
-                except Exception:
-                    aligned = None
-            yaw, pitch, roll = estimate_pose_from_landmarks(image_bgr.shape, landmarks)
 
-            detections.append(
-                DetectedFace(
-                    bbox=bbox,
-                    landmarks=[[float(x), float(y)] for x, y in landmarks],
-                    landmarks_dense=(
-                        [[float(x), float(y)] for x, y in dense_landmarks]
-                        if dense_landmarks
-                        else None
-                    ),
-                    det_score=float(face.det_score) if getattr(face, "det_score", None) is not None else None,
-                    aligned_image=aligned,
-                    yaw=yaw,
-                    pitch=pitch,
-                    roll=roll,
-                    occlusion_score=_extract_occlusion_score(face),
-                    detection_backend="insightface",
-                )
-            )
-
-        return detections
+def _bbox_from_points(points: list[list[float]]) -> list[float]:
+    if not points:
+        return [0.0, 0.0, 0.0, 0.0]
+    xs = [float(point[0]) for point in points]
+    ys = [float(point[1]) for point in points]
+    return [float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))]
 
 
 def select_detection_with_auto_alignment(
     *,
-    detector: InsightFaceDetector,
+    detector: MediaPipeDetector,
     image_bgr: np.ndarray,
     target_image_size: list[int],
     quality_gate: dict[str, Any],
