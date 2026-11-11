@@ -34,7 +34,8 @@ flowchart LR
 | `scripts/` | Команды подготовки данных, обучения и inference |
 | `apps/web/` | Vue 3 + Vite интерфейс |
 | `tests/` | Проверки модулей и pipeline |
-| `docs/technical-guide.md` | Подробный runbook и описание артефактов |
+| `docs/technical-guide.md` | Подробный runbook и описание pipeline |
+| `docs/model-training-guide.md` | Пошаговое обучение scorer на своём датасете |
 
 ## Быстрый старт
 
@@ -86,7 +87,7 @@ python scripts/extract_scoring_features.py
 python scripts/train_scorer.py
 ```
 
-Это обучает модели на геометрических признаках лица, а не на пикселях. Группы делятся на train/validation/test; маленькие и несбалансированные группы дадут ненадёжный результат. Обучение перезаписывает локальные файлы в `models/scoring/`.
+Это обучает модели на геометрических признаках лица, а не на пикселях. Группы делятся на train/validation/test; маленькие и несбалансированные группы дадут ненадёжный результат. Обучение перезаписывает локальные файлы в `models/scoring/`. См. [подробный гайд по обучению](docs/model-training-guide.md).
 
 Если вместо этого нужно пересобрать **reference baseline** для своей популяции, положите поддерживаемый reference dataset в `data/raw/`, затем выполните manifest → preprocessing → feature extraction → `python scripts/train_baseline.py`. Эта reference-модель хранит статистики измерений по группам, а не предсказывает субъективный score. Подробности и артефакты описаны в [техническом руководстве](docs/technical-guide.md).
 
