@@ -283,6 +283,9 @@ MediaPipe path остаётся optional:
 
 `scripts/train_baseline.py` сохраняет legacy-name entry point, но теперь строит
 не regressor baseline, а **reference model** по morphometric features.
+Это групповые reference-статистики для сравнения признаков, а не supervised
+модель субъективной оценки лица. Готовые артефакты уже находятся в
+`models/reference/`; обучение нужно только при пересборке reference-набора.
 
 Reference groups выбираются конфигом:
 - `group_label_aliases`
@@ -546,6 +549,13 @@ objective reference model. Он обучается на dataset tree, где и�
 - `dataset/5.5/`
 - `dataset/7/`
 - `dataset/8.5/`
+
+Для scorer не нужно обучать собственный детектор лица. Feature extraction
+использует настроенные landmark assets (включая
+`data/interim/mediapipe/face_landmarker.task`), а обучение scorer строит
+tabular-модели по геометрическим признакам. Команды ниже перезаписывают
+артефакты в `models/scoring/`; сохраните копию текущих файлов, если хотите
+оставить исходный scorer.
 
 Что важно:
 
