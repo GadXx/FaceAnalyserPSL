@@ -2,10 +2,13 @@ export type OverlayLayers = {
   measurements: boolean;
   angles: boolean;
   symmetry: boolean;
+  faceOval: boolean;
   thirds: boolean;
   eyes: boolean;
+  brows: boolean;
   nose: boolean;
   mouth: boolean;
+  cheekbones: boolean;
   chinJaw: boolean;
 };
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import importlib.util
 import io
+import os
 import sys
 import tempfile
 import unittest
@@ -111,6 +112,8 @@ class CliSmokeTests(unittest.TestCase):
     def test_run_api_cli_delegates_to_uvicorn(self) -> None:
         script_path = Path("scripts/run_api.py").resolve()
         module = _load_script_module("run_api_cli_test", script_path)
+
+        self.assertEqual(os.environ.get("MEDIAPIPE_DISABLE_GPU"), "1")
 
         with patch.object(module.uvicorn, "run") as mocked_run:
             with patch.object(sys, "argv", ["run_api.py", "--host", "127.0.0.1", "--port", "9000"]):

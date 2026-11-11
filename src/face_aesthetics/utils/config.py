@@ -9,6 +9,7 @@ DEFAULT_CONFIG_FILES = (
     "base.yaml",
     "data.yaml",
     "features.yaml",
+    "landmarks.yaml",
     "preprocess.yaml",
     "train_baseline.yaml",
     "train_geometry.yaml",
@@ -35,7 +36,7 @@ def load_named_configs(
 
     for file_name in file_names:
         config_path = config_dir / file_name
-        configs[config_path.stem] = load_yaml(config_path)
+        configs[config_path.stem] = load_yaml(config_path) if config_path.exists() else {}
 
     return configs
 

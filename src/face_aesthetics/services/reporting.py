@@ -32,7 +32,7 @@ def compute_optional_composite_indices(
     normalized_measurements: dict[str, float | None],
     symmetry_features: dict[str, float | None],
     z_scores: dict[str, float | None],
-    mahalanobis_distance: float,
+    mahalanobis_distance: float | None,
 ) -> dict[str, float | None]:
     normalized_values = _finite_values(normalized_measurements)
     z_values = [abs(float(value)) for value in z_scores.values() if value is not None and np.isfinite(float(value))]
@@ -46,7 +46,7 @@ def compute_optional_composite_indices(
         )
 
     reference_deviation_index = None
-    if np.isfinite(float(mahalanobis_distance)):
+    if mahalanobis_distance is not None and np.isfinite(float(mahalanobis_distance)):
         reference_deviation_index = float(1.0 / (1.0 + max(float(mahalanobis_distance), 0.0)))
 
     morphometric_harmony_index = None
@@ -77,11 +77,13 @@ def build_reporting_limitations(
     quality_fail_reason: str | None,
     provider_diagnostics: dict[str, Any],
     reference_group_sample_count: int | None,
+    reference_warning: str | None = None,
 ) -> list[str]:
     limitations = [
         "Outputs are descriptive morphometric statistics, not attractiveness or beauty scores.",
         "Percentile positions are estimated from stored reference percentiles and may be coarse between control points.",
         "Reference comparisons depend on the selected reference group and available sample counts.",
+        "philtrum_width_proxy is a 2D proxy derived from lip-region landmarks and should be treated as lower-confidence than directly indexed nose-base or mouth-corner measurements.",
     ]
     if not quality_pass:
         limitations.append(
@@ -95,6 +97,8 @@ def build_reporting_limitations(
         limitations.append(
             f"Selected reference group has limited sample support (sample_count={reference_group_sample_count})."
         )
+    if reference_warning:
+        limitations.append(reference_warning)
     return limitations
 
 
@@ -124,6 +128,132 @@ def build_formula_transparency() -> dict[str, Any]:
         "morphometric_harmony_index": "mean of available symmetry/proportion/reference components",
     }
     return grouped
+
+
+def _feature_registry_lookup() -> dict[str, dict[str, Any]]:
+    return {str(row["feature_name"]): row for row in feature_registry_rows()}
+
+
+def _expanded_geometry_groups() -> dict[str, list[str]]:
+    return {
+        "face_oval": [
+            "mediapipe_face_oval_width",
+            "mediapipe_face_oval_height",
+            "mediapipe_face_oval_aspect_ratio",
+            "mediapipe_face_contour_symmetry_index",
+        ],
+        "eyes": [
+            "mediapipe_left_eye_width",
+            "mediapipe_right_eye_width",
+            "mediapipe_left_eye_height",
+            "mediapipe_right_eye_height",
+            "mediapipe_left_eye_area_proxy",
+            "mediapipe_right_eye_area_proxy",
+            "mediapipe_eye_shape_symmetry_index",
+            "mediapipe_left_upper_eyelid_curve_proxy",
+            "mediapipe_right_upper_eyelid_curve_proxy",
+        ],
+        "brows": [
+            "mediapipe_left_brow_width",
+            "mediapipe_right_brow_width",
+            "mediapipe_left_brow_angle_deg",
+            "mediapipe_right_brow_angle_deg",
+            "mediapipe_brow_symmetry_index",
+        ],
+        "nose": [
+            "mediapipe_nose_width",
+            "mediapipe_nose_base_width",
+            "mediapipe_nose_length",
+            "mediapipe_nose_bridge_width_proxy",
+            "mediapipe_nose_axis_angle_deg",
+            "mediapipe_nose_symmetry_index",
+        ],
+        "mouth_lips": [
+            "mediapipe_mouth_width",
+            "mediapipe_mouth_height",
+            "mediapipe_upper_lip_height",
+            "mediapipe_lower_lip_height",
+            "mediapipe_total_lip_height",
+            "mediapipe_lip_area_ratio",
+            "mediapipe_mouth_line_angle_deg",
+            "mediapipe_lip_symmetry_index",
+        ],
+        "cheekbones_midface": [
+            "mediapipe_cheekbone_width_proxy",
+            "mediapipe_midface_width_proxy",
+            "mediapipe_midface_height_proxy",
+            "mediapipe_cheekbone_width_to_jaw_ratio",
+        ],
+        "jaw_chin": [
+            "mediapipe_jaw_width_proxy",
+            "mediapipe_chin_width_to_jaw_width",
+            "mediapipe_jaw_taper_ratio",
+            "mediapipe_chin_taper_ratio",
+        ],
+    }
+
+
+def build_expanded_geometry_payload(
+    *,
+    raw_measurements: dict[str, float | None],
+    normalized_measurements: dict[str, float | None],
+    symmetry_features: dict[str, float | None],
+    angle_features: dict[str, float | None],
+) -> dict[str, Any]:
+    values = {
+        **raw_measurements,
+        **normalized_measurements,
+        **symmetry_features,
+        **angle_features,
+    }
+    registry = _feature_registry_lookup()
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for group_name, feature_names in _expanded_geometry_groups().items():
+        rows: list[dict[str, Any]] = []
+        for feature_name in feature_names:
+            metadata = registry.get(feature_name, {})
+            rows.append(
+                {
+                    "feature_name": feature_name,
+                    "value": values.get(feature_name),
+                    "source": metadata.get("source"),
+                    "reliability": metadata.get("reliability"),
+                    "units": metadata.get("units"),
+                    "component": metadata.get("component"),
+                    "recommended_for_scorer": metadata.get("recommended_for_scorer"),
+                    "exclusion_reason": metadata.get("exclusion_reason"),
+                }
+            )
+        groups[group_name] = rows
+
+    unavailable_without_face_parsing = []
+    for feature_name in ("visible_left_ear_height", "visible_right_ear_height", "visible_ear_width", "hairline_to_brow_height", "skin_mask_face_area"):
+        metadata = registry.get(feature_name, {})
+        unavailable_without_face_parsing.append(
+            {
+                "feature_name": feature_name,
+                "source": metadata.get("source", "face_parsing"),
+                "reliability": metadata.get("reliability", "unavailable_without_extra_model"),
+                "status": "unavailable_without_face_parsing",
+            }
+        )
+
+    mediapipe_all = [name for name in values if str(name).startswith("mediapipe_")]
+    mediapipe_non_null = [name for name in mediapipe_all if values.get(name) is not None and np.isfinite(float(values.get(name)))]
+
+    reliability_counts: dict[str, int] = {}
+    for feature_name in mediapipe_all:
+        reliability = str(registry.get(feature_name, {}).get("reliability", "unknown"))
+        reliability_counts[reliability] = reliability_counts.get(reliability, 0) + 1
+
+    return {
+        "available": bool(mediapipe_non_null),
+        "mediapipe_feature_count": int(len(mediapipe_all)),
+        "mediapipe_non_null_feature_count": int(len(mediapipe_non_null)),
+        "reliability_counts": reliability_counts,
+        "groups": groups,
+        "unavailable_without_face_parsing": unavailable_without_face_parsing,
+    }
 
 
 def build_reference_selection_transparency(
@@ -191,10 +321,13 @@ def build_visualization_payload(
     bbox: list[float] | None,
     landmarks: list[list[float]] | None,
     landmarks_dense: list[list[float]] | None,
+    mediapipe_landmarks: list[list[float]] | None = None,
+    mediapipe_regions: dict[str, list[int]] | None = None,
     coordinate_space: str,
     image_path: Path | None = None,
 ) -> dict[str, Any]:
     notes: list[str] = []
+    detector_bbox = bbox
     anchors: dict[str, dict[str, float]] | None = None
     derived_points: dict[str, dict[str, float]] | None = None
     named_points: dict[str, dict[str, float]] | None = None
@@ -207,6 +340,8 @@ def build_visualization_payload(
     axes: list[dict[str, Any]] = []
     guides: list[dict[str, Any]] = []
     groups: dict[str, list[str]] = {}
+    semantic_face_extents: dict[str, Any] | None = None
+    display_face_box: list[float] | None = None
 
     if bbox is None:
         notes.append("Bounding box was not available in preprocessing output.")
@@ -229,6 +364,21 @@ def build_visualization_payload(
         )
 
         points = np.asarray(landmarks[:5], dtype=np.float64)
+        dense_context = derive_dense_visual_context(
+            landmarks=landmarks,
+            landmarks_dense=landmarks_dense,
+            bbox=bbox,
+        )
+        semantic_face_extents = (
+            dict(dense_context.get("semantic_face_extents", {}))
+            if isinstance(dense_context.get("semantic_face_extents"), dict)
+            else None
+        )
+        display_face_box = (
+            [float(value) for value in dense_context.get("display_face_box", [])]
+            if isinstance(dense_context.get("display_face_box"), list) and len(dense_context.get("display_face_box", [])) == 4
+            else bbox
+        )
         left_eye = np.asarray(
             [semantic_points.get("left_eye_center", {}).get("x", points[0][0]), semantic_points.get("left_eye_center", {}).get("y", points[0][1])],
             dtype=np.float64,
@@ -257,8 +407,8 @@ def build_visualization_payload(
             [semantic_points.get("mouth_center", {}).get("x", ((left_mouth + right_mouth) / 2.0)[0]), semantic_points.get("mouth_center", {}).get("y", ((left_mouth + right_mouth) / 2.0)[1])],
             dtype=np.float64,
         )
-        if bbox and len(bbox) == 4:
-            x1, y1, x2, y2 = [float(value) for value in bbox]
+        if display_face_box and len(display_face_box) == 4:
+            x1, y1, x2, y2 = [float(value) for value in display_face_box]
             face_center_x = (x1 + x2) / 2.0
             axis_top = np.asarray([face_center_x, y1], dtype=np.float64)
             axis_bottom = np.asarray([face_center_x, y2], dtype=np.float64)
@@ -268,12 +418,6 @@ def build_visualization_payload(
             max_y = float(max(left_eye[1], right_eye[1], nose[1], left_mouth[1], right_mouth[1]))
             axis_top = np.asarray([face_center_x, min_y], dtype=np.float64)
             axis_bottom = np.asarray([face_center_x, max_y], dtype=np.float64)
-
-        dense_context = derive_dense_visual_context(
-            landmarks=landmarks,
-            landmarks_dense=landmarks_dense,
-            bbox=bbox,
-        )
         brow_left = _context_point(dense_context, "left_brow")
         brow_right = _context_point(dense_context, "right_brow")
         brow_center = (
@@ -374,6 +518,8 @@ def build_visualization_payload(
             "chin_jaw": ["chin_center", "jaw_left", "jaw_right", "cheekbone_left", "cheekbone_right"],
             "midline": ["facial_midline_top", "facial_midline_bottom"],
         }
+        if semantic_face_extents is not None:
+            groups["face_extents"] = ["facial_midline_top", "facial_midline_bottom"]
 
         lines = [
             _line_entry(key="interpupillary_line", start="left_eye_center", end="right_eye_center", group="eyes", kind="measurement", layers=["measurements", "eyes"], metric_key="raw_eye_distance_px", supported_features=["raw_eye_distance_px", "ratio_eye_distance_to_face_width", "ratio_eye_distance_to_mouth_width"]),
@@ -457,6 +603,14 @@ def build_visualization_payload(
         if semantic_validation is not None and not bool(semantic_validation.get("passed", False)):
             for warning in semantic_validation.get("failed_checks", []):
                 notes.append(f"semantic_validation:{warning}")
+        nose_source_rules = {
+            key: value.get("source_rule")
+            for key, value in (semantic_points or {}).items()
+            if "nose" in key or "alare" in key or "subnasale" in key or key == "philtrum_top"
+            if isinstance(value, dict) and value.get("source_rule")
+        }
+        if nose_source_rules:
+            notes.append(f"nose_semantic_rules:{json.dumps(nose_source_rules, ensure_ascii=False)}")
 
     if anchors and derived_points:
         status = "available"
@@ -478,11 +632,31 @@ def build_visualization_payload(
         "coordinate_space": coordinate_space,
         "image_path": str(image_path.resolve()) if image_path is not None else None,
         "image_size": image_payload,
-        "bbox": bbox,
+        "bbox": display_face_box,
+        "detector_bbox": detector_bbox,
+        "semantic_face_extents": semantic_face_extents,
+        "display_face_box": display_face_box,
         "image_width": int(image_size[0]) if image_size is not None else None,
         "image_height": int(image_size[1]) if image_size is not None else None,
         "raw_landmarks": landmark_points,
         "raw_landmarks_debug": raw_landmarks_debug,
+        "mediapipe_landmarks": (
+            [
+                {
+                    "index": int(index),
+                    "x": float(point[0]),
+                    "y": float(point[1]),
+                    "group": "mediapipe_dense",
+                    "name": None,
+                    "source_type": "mediapipe_face_mesh",
+                    "source_indices": [int(index)],
+                    "description": "MediaPipe dense landmark",
+                }
+                for index, point in enumerate(mediapipe_landmarks or [])
+                if isinstance(point, (list, tuple)) and len(point) >= 2
+            ]
+        ),
+        "mediapipe_regions": mediapipe_regions or {},
         "semantic_points": semantic_points,
         "semantic_points_debug": semantic_points_debug,
         "measurement_overlays": {
@@ -523,14 +697,17 @@ def build_report_payload(
     bbox: list[float] | None,
     landmarks: list[list[float]] | None,
     landmarks_dense: list[list[float]] | None,
+    mediapipe_landmarks: list[list[float]] | None = None,
+    mediapipe_regions: dict[str, list[int]] | None = None,
     raw_measurements: dict[str, float | None],
     normalized_measurements: dict[str, float | None],
     symmetry_features: dict[str, float | None],
     angle_features: dict[str, float | None],
     selected_group_key: str,
     selected_group: dict[str, Any],
+    reference_comparison: dict[str, Any],
     z_scores: dict[str, float | None],
-    mahalanobis_distance: float,
+    mahalanobis_distance: float | None,
     percentile_positions: dict[str, float | None],
     feature_deviations: list[dict[str, Any]],
     top_k_features: int,
@@ -550,6 +727,13 @@ def build_report_payload(
         quality_fail_reason=processing_row.get("quality_fail_reason"),
         provider_diagnostics=provider_diagnostics,
         reference_group_sample_count=selected_group.get("sample_count"),
+        reference_warning=reference_comparison.get("warning"),
+    )
+    expanded_geometry = build_expanded_geometry_payload(
+        raw_measurements=raw_measurements,
+        normalized_measurements=normalized_measurements,
+        symmetry_features=symmetry_features,
+        angle_features=angle_features,
     )
 
     return {
@@ -611,6 +795,8 @@ def build_report_payload(
             bbox=bbox,
             landmarks=landmarks,
             landmarks_dense=landmarks_dense,
+            mediapipe_landmarks=mediapipe_landmarks,
+            mediapipe_regions=mediapipe_regions,
             coordinate_space=measurement_image_role,
             image_path=measurement_image_path,
         ),
@@ -618,6 +804,7 @@ def build_report_payload(
         "normalized_ratios": normalized_measurements,
         "symmetry_metrics": symmetry_features,
         "angle_metrics": angle_features,
+        "expanded_geometry": expanded_geometry,
         "reference_comparison": {
             "selected_group": {
                 "group_key": selected_group_key,
@@ -625,8 +812,9 @@ def build_report_payload(
                 "sample_count": selected_group.get("sample_count"),
                 "complete_case_count": selected_group.get("complete_case_count"),
             },
+            **reference_comparison,
             "z_scores": z_scores,
-            "mahalanobis_distance": float(mahalanobis_distance),
+            "mahalanobis_distance": (float(mahalanobis_distance) if mahalanobis_distance is not None else None),
             "percentile_positions": percentile_positions,
         },
         "feature_level_deviations": {
@@ -759,6 +947,34 @@ def render_markdown_report(report: dict[str, Any]) -> str:
     lines.extend(_emit_mapping("Normalized Ratios", report["normalized_ratios"]))
     lines.extend(_emit_mapping("Symmetry Metrics", report["symmetry_metrics"]))
     lines.extend(_emit_mapping("Angle Metrics", report["angle_metrics"]))
+    expanded_geometry = report.get("expanded_geometry") or {}
+    lines.extend(
+        [
+            "",
+            "## Expanded Geometry",
+            f"- available: `{expanded_geometry.get('available')}`",
+            f"- mediapipe_feature_count: `{expanded_geometry.get('mediapipe_feature_count')}`",
+            f"- mediapipe_non_null_feature_count: `{expanded_geometry.get('mediapipe_non_null_feature_count')}`",
+        ]
+    )
+    reliability_counts = expanded_geometry.get("reliability_counts")
+    if isinstance(reliability_counts, dict):
+        for reliability_name, reliability_value in reliability_counts.items():
+            lines.append(f"- reliability[{reliability_name}]: `{reliability_value}`")
+    expanded_groups = expanded_geometry.get("groups")
+    if isinstance(expanded_groups, dict):
+        for group_name, items in expanded_groups.items():
+            lines.append(f"- {group_name}:")
+            if not isinstance(items, list):
+                continue
+            for item in items:
+                if not isinstance(item, dict):
+                    continue
+                lines.append(
+                    "  - "
+                    f"{item.get('feature_name')}: value=`{item.get('value')}`, "
+                    f"source=`{item.get('source')}`, reliability=`{item.get('reliability')}`"
+                )
 
     lines.extend(
         [
@@ -767,6 +983,8 @@ def render_markdown_report(report: dict[str, Any]) -> str:
             f"- selected_group_key: `{reference['selected_group']['group_key']}`",
             f"- sample_count: `{reference['selected_group']['sample_count']}`",
             f"- complete_case_count: `{reference['selected_group']['complete_case_count']}`",
+            f"- status: `{reference.get('status')}`",
+            f"- warning: `{reference.get('warning')}`",
             f"- mahalanobis_distance: `{reference['mahalanobis_distance']}`",
         ]
     )
@@ -832,6 +1050,8 @@ def save_report_bundle(
         "alignment_rotation_deg": report["input_quality"]["alignment"]["rotation_deg"],
         "selected_group_key": report["reference_comparison"]["selected_group"]["group_key"],
         "selected_group_sample_count": report["reference_comparison"]["selected_group"]["sample_count"],
+        "reference_comparison_status": report["reference_comparison"].get("status"),
+        "reference_comparison_warning": report["reference_comparison"].get("warning"),
         "mahalanobis_distance": report["reference_comparison"]["mahalanobis_distance"],
         "top_feature_deviation_count": len(report["feature_level_deviations"]["top_contributing_features"]),
         "optional_composite_indices": report["optional_composite_indices"],

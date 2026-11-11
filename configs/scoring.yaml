@@ -1,0 +1,314 @@
+{
+  "scoring": {
+    "dataset_root": "dataset",
+    "allowed_image_extensions": [".jpg", ".jpeg", ".png", ".webp", ".bmp"],
+    "manifest_path": "data/scoring/scoring_manifest.parquet",
+    "features_path": "data/scoring/scoring_features.parquet",
+    "processed_analysis_dir": "data/scoring/processed/analysis_images",
+    "processed_aligned_dir": "data/scoring/processed/aligned_faces",
+    "model_dir": "models/scoring",
+    "regressor_artifact_path": "models/scoring/scorer_regressor.joblib",
+    "classifier_artifact_path": "models/scoring/scorer_classifier.joblib",
+    "config_snapshot_path": "models/scoring/scoring_config_snapshot.json",
+    "summary_paths": {
+      "dataset_summary_path": "reports/metrics/scoring_dataset_summary.json",
+      "feature_summary_path": "reports/metrics/scoring_feature_summary.json",
+      "training_summary_path": "reports/metrics/scorer_training_summary.json",
+      "selected_features_path": "reports/metrics/scorer_selected_features.json",
+      "feature_importance_path": "reports/metrics/scorer_feature_importance.json",
+      "feature_correlations_path": "reports/metrics/scorer_feature_correlations.json",
+      "global_feature_importance_path": "reports/metrics/scorer_global_feature_importance.json",
+      "component_importance_path": "reports/metrics/scorer_component_importance.json",
+      "feature_effects_path": "reports/metrics/scorer_feature_effects.json",
+      "group_confusion_path": "reports/metrics/scorer_group_confusion.json",
+      "groupwise_errors_path": "reports/metrics/scorer_groupwise_errors.json",
+      "quality_failures_path": "reports/metrics/scoring_quality_failures.json",
+      "pairwise_summary_path": "reports/metrics/pairwise_ranker_summary.json",
+      "ordinal_summary_path": "reports/metrics/ordinal_scorer_summary.json",
+      "ensemble_summary_path": "reports/metrics/scorer_ensemble_summary.json",
+      "pairwise_dataset_summary_path": "reports/metrics/scoring_pairwise_summary.json"
+    },
+    "report_paths": {
+      "json_path": "reports/examples/scorer_report.json",
+      "markdown_path": "reports/examples/scorer_report.md"
+    },
+    "split_ratios": {
+      "train": 0.7,
+      "val": 0.15,
+      "test": 0.15
+    },
+    "random_seed": 42,
+    "target_column": "target_score",
+    "target_group_column": "target_group_label",
+    "split_column": "split",
+    "image_id_column": "image_id",
+    "feature_mode": "geometry_only",
+    "feature_source_policy": {
+      "mode": "mediapipe_only",
+      "allow_insightface_features_in_primary": false,
+      "allow_fused_features_in_primary": false,
+      "allow_legacy_features_in_primary": false,
+      "allow_mediapipe_features_in_primary": true,
+      "allow_reference_relative_mediapipe_features": true,
+      "allow_fallback_to_mixed_primary": false
+    },
+    "quality_gate_policy": "train_only_quality_pass",
+    "minimum_samples_per_group_warning": 5,
+    "include_feature_families": ["normalized", "symmetry", "angles"],
+    "include_raw_pixel_features": false,
+    "allow_raw_pixel_features": false,
+    "allow_embeddings": false,
+    "allow_metadata_features": false,
+    "exclude_feature_patterns": ["raw_*", "*_px"],
+    "feature_exclude_columns": ["philtrum_width_proxy"],
+    "max_missing_fraction_per_feature": 0.4,
+    "cv": {
+      "enabled": true,
+      "n_splits": 5,
+      "shuffle": true,
+      "selection_metric": "mae",
+      "secondary_metric": "spearman"
+    },
+    "calibration": {
+      "enabled": true,
+      "method": "isotonic_regression",
+      "fit_split": "val"
+    },
+    "score_semantics": {
+      "score_range": [0.0, 10.0],
+      "observed_training_label_range": "auto",
+      "average_zone_center": 5.0,
+      "elite_anchor_score": 9.5,
+      "elite_percentile_hint": 0.99,
+      "theoretical_max_score": 10.0,
+      "invalid_or_severe_anomaly_score": 0.0,
+      "strict_scale": true
+    },
+    "strict_scoring": {
+      "enabled": true,
+      "penalize_regression_to_mean": true,
+      "high_score_threshold": 8.5,
+      "low_score_threshold": 3.0,
+      "elite_score_threshold": 9.0,
+      "extreme_bias_penalty_weight": 1.0,
+      "high_score_underprediction_penalty": 1.5,
+      "low_score_overprediction_penalty": 1.5,
+      "group_macro_mae_weight": 1.0,
+      "high_group_mae_weight": 1.5,
+      "low_group_mae_weight": 1.5,
+      "ranking_weight": 1.0,
+      "calibration_weight": 1.0
+    },
+    "sample_weighting": {
+      "enabled": true,
+      "strategy": "inverse_group_frequency"
+    },
+    "pairwise": {
+      "enabled": true,
+      "max_pairs_per_anchor": 24,
+      "close_distance_threshold": 1.0,
+      "close_distance_pair_multiplier": 2.0,
+      "reference_examples_per_group": 8,
+      "large_distance_threshold": 3.0,
+      "large_distance_pair_multiplier": 1.75,
+      "high_vs_mid_pair_multiplier": 1.75,
+      "low_vs_mid_pair_multiplier": 1.75,
+      "elite_vs_average_pair_multiplier": 2.25
+    },
+    "ordinal": {
+      "enabled": true,
+      "min_positive_threshold_samples": 4
+    },
+    "ensemble": {
+      "regression_weight": 0.45,
+      "pairwise_weight": 0.35,
+      "ordinal_weight": 0.20,
+      "disagreement_std_threshold": 0.75
+    },
+    "prediction_clipping": {
+      "enabled": true,
+      "min": 0.0,
+      "max": 10.0
+    },
+    "regression_models": {
+      "ridge": {
+        "enabled": true,
+        "alpha": 1.0
+      },
+      "elastic_net": {
+        "enabled": true,
+        "alpha": 0.05,
+        "l1_ratio": 0.2
+      },
+      "random_forest": {
+        "enabled": true,
+        "n_estimators": 300,
+        "max_depth": 10,
+        "min_samples_leaf": 2
+      },
+      "gradient_boosting": {
+        "enabled": true,
+        "n_estimators": 250,
+        "learning_rate": 0.05,
+        "max_depth": 3
+      },
+      "hist_gradient_boosting": {
+        "enabled": true,
+        "max_depth": 4,
+        "learning_rate": 0.05,
+        "max_iter": 250
+      },
+      "xgboost": {
+        "enabled": false,
+        "n_estimators": 300,
+        "max_depth": 6,
+        "learning_rate": 0.05,
+        "subsample": 0.9,
+        "colsample_bytree": 0.9,
+        "reg_alpha": 0.0,
+        "reg_lambda": 1.0
+      }
+    },
+    "classification_models": {
+      "logistic_regression": {
+        "enabled": true,
+        "max_iter": 1000,
+        "c": 1.0
+      },
+      "random_forest": {
+        "enabled": true,
+        "n_estimators": 300,
+        "max_depth": 10,
+        "min_samples_leaf": 1
+      },
+      "gradient_boosting": {
+        "enabled": true,
+        "n_estimators": 250,
+        "learning_rate": 0.05,
+        "max_depth": 3
+      }
+    },
+    "selection_metric": "mae",
+    "model_selection_guardrails": {
+      "enabled": true,
+      "candidate_feature_sets": [
+        "mediapipe_only_core_ratios",
+        "mediapipe_only_shape_symmetry_angles",
+        "mediapipe_only_reference_relative",
+        "mediapipe_only_absolute_plus_reference",
+        "mediapipe_only_component_balanced",
+        "mediapipe_only_no_pose",
+        "mediapipe_only_high_low_weighted",
+        "mediapipe_only_expanded_full_dedup",
+        "combined_weighted_no_duplicate",
+        "absolute_plus_best_reference_50"
+      ],
+      "anchor_feature_set_name": "mediapipe_only_absolute_plus_reference",
+      "min_test_mae_improvement_against_anchor": 1.1298,
+      "min_test_r2": 0.6047,
+      "min_test_spearman": 0.7958,
+      "max_abs_high_group_bias": 1.25,
+      "max_abs_low_group_bias": 1.75,
+      "high_score_collapse_threshold": 8.5,
+      "reject_if_high_score_pred_below": 6.0,
+      "warn_if_high_score_pred_below": 7.0,
+      "max_high_score_collapse_below_6_count": 0,
+      "high_score_collapse_penalty": 30.0,
+      "prefer_reference_relative_features": true,
+      "hard_penalty_reference_relative_zero": 5.0,
+      "hard_penalty_metric_degradation": 10.0
+    },
+    "confidence": {
+      "dense_training_quantiles": [0.1, 0.9],
+      "max_regression_classifier_disagreement": 1.5,
+      "max_primary_aux_disagreement": 1.25,
+      "max_imputed_fraction_for_high": 0.05,
+      "max_imputed_fraction_for_medium": 0.2,
+      "min_classifier_top_probability_for_high": 0.45,
+      "min_classifier_top_probability_for_medium": 0.25
+    },
+    "pose_features": {
+      "use_in_scorer": true,
+      "max_component_weight": 0.15,
+      "use_as_quality_features": true
+    },
+    "components": {
+      "face_shape": [
+        "ratio_face_aspect",
+        "ratio_upper_face_height_to_face_height",
+        "ratio_lower_face_height_to_face_height",
+        "ratio_forehead_height_proxy_to_face_height",
+        "ratio_jaw_height_proxy_to_face_height"
+      ],
+      "vertical_proportions": [
+        "ratio_upper_third_to_middle_third",
+        "ratio_middle_third_to_lower_third",
+        "ratio_nose_base_to_mouth_to_lower_third",
+        "ratio_mouth_to_chin_to_lower_third",
+        "thirds_balance_index"
+      ],
+      "horizontal_proportions": [
+        "ratio_intercanthal_to_eye_width",
+        "ratio_outercanthal_to_face_width",
+        "ratio_nose_width_to_face_width",
+        "ratio_mouth_width_to_face_width",
+        "ratio_cheekbone_width_to_jaw_width"
+      ],
+      "eyes": [
+        "ratio_eye_spacing_to_eye_width",
+        "ratio_eye_spacing_to_face_width",
+        "ratio_eye_height_to_eye_width",
+        "ratio_eye_distance_to_face_width",
+        "ratio_eye_distance_to_mouth_width",
+        "canthal_tilt_deg"
+      ],
+      "nose": [
+        "ratio_nose_length_to_face_height",
+        "ratio_nose_width_to_face_width",
+        "ratio_nose_width_to_mouth_width",
+        "ratio_nose_to_philtrum",
+        "nose_to_chin_axis_diff",
+        "face_centerline_vs_nose_angle"
+      ],
+      "mouth_lips": [
+        "ratio_mouth_width_to_face_width",
+        "ratio_mouth_width_to_nose_width",
+        "ratio_mouth_to_chin",
+        "ratio_upper_lip_to_lower_lip",
+        "sym_mouth_nose_delta_ratio",
+        "angle_mouth_line_deg"
+      ],
+      "jaw_chin": [
+        "jaw_angle_asymmetry",
+        "ratio_chin_width_to_jaw_width",
+        "ratio_cheekbone_width_to_jaw_width",
+        "lower_face_tilt_proxy",
+        "ratio_mouth_to_chin"
+      ],
+      "cheekbones": [
+        "ratio_cheekbone_width_to_jaw_width",
+        "ratio_outercanthal_to_face_width"
+      ],
+      "symmetry": [
+        "symmetry_index",
+        "brow_symmetry_ratio",
+        "midline_alignment_index",
+        "upper_face_symmetry_index",
+        "lower_face_symmetry_index",
+        "sym_eye_nose_delta_ratio",
+        "sym_mouth_nose_delta_ratio",
+        "sym_horizontal_center_offset_ratio"
+      ],
+      "angles_pose": [
+        "pose_yaw_deg",
+        "pose_pitch_deg",
+        "pose_roll_deg",
+        "angle_eye_line_deg",
+        "angle_mouth_line_deg",
+        "face_centerline_vs_nose_angle",
+        "eye_line_vs_mouth_line_diff",
+        "lower_face_tilt_proxy"
+      ]
+    }
+  }
+}

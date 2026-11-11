@@ -29,11 +29,13 @@ const HELP_ALIASES = {
   "section.normalized_ratios": "section.normalized_ratios",
   "section.symmetry_metrics": "section.symmetry_metrics",
   "section.angle_metrics": "section.angle_metrics",
+  "section.expanded_geometry": "section.expanded_geometry",
   "section.reference_comparison": "section.reference_comparison",
   "section.feature_deviations": "section.feature_deviations",
   "section.composite_indices": "section.composite_indices",
   "section.limitations": "section.limitations",
   "section.artifacts": "section.artifacts",
+  "section.experimental_score": "section.experimental_score",
   "field.reference_group_selector": "field.reference_group_selector",
   "field.manual_group_override": "field.manual_group_override",
   "field.execution_provider": "field.execution_provider",
@@ -54,6 +56,11 @@ const HELP_ALIASES = {
   "toggle.labels": "toggle.labels",
   "toggle.all_landmarks": "toggle.all_landmarks",
   "toggle.debug_indices": "toggle.debug_indices",
+  "toggle.mediapipe_points": "toggle.mediapipe_points",
+  "toggle.face_oval": "toggle.face_oval",
+  "toggle.brows": "toggle.brows",
+  "toggle.cheekbones": "toggle.cheekbones",
+  "toggle.symmetry_axes": "toggle.symmetry_axes",
   processing_status: "processing_status",
   quality_pass: "quality_pass",
   quality_fail_reason: "quality_fail_reason",
@@ -94,6 +101,16 @@ const HELP_ALIASES = {
   reference_deviation_index: "reference_deviation_index",
   top_contributing_features: "top_contributing_features",
   limitations: "limitations",
+  predicted_score: "predicted_score",
+  primary_score: "primary_score",
+  nearest_score_group: "nearest_score_group",
+  confidence: "confidence",
+  predicted_group: "predicted_group",
+  group_probabilities: "group_probabilities",
+  component_contribution: "component_contribution",
+  top_positive_feature: "top_positive_feature",
+  top_negative_feature: "top_negative_feature",
+  auxiliary_diagnostics: "auxiliary_diagnostics",
 };
 
 /** @type {Record<string, HelpEntry>} */
@@ -178,6 +195,16 @@ const HELP_ENTRIES = {
       interpretation: "Большие по модулю pose-углы могут снижать доверие к морфометрической интерпретации, если лицо плохо нормализовано.",
     },
   },
+  "section.expanded_geometry": {
+    en: {
+      short: "Grouped expanded morphometric measurements derived from MediaPipe dense landmarks.",
+      interpretation: "Rows tagged as proxy or unstable are informative diagnostics and should not be treated as strict ground truth.",
+    },
+    ru: {
+      short: "Сгруппированные расширенные морфометрические измерения, полученные из dense landmarks MediaPipe.",
+      interpretation: "Строки с пометкой proxy или unstable — это диагностические сигналы, а не строгая ground truth.",
+    },
+  },
   "section.reference_comparison": {
     en: {
       short: "Compares the current normalized feature vector to a selected reference group using descriptive statistics.",
@@ -225,6 +252,92 @@ const HELP_ENTRIES = {
     ru: {
       short: "Показывает, какие файлы создал backend и какой именно артефакт изображения был реально использован для анализа и overlay.",
     },
+  },
+  "section.experimental_score": {
+    en: {
+      short: "Displays the optional experimental scoring result trained on folder-based score labels.",
+      interpretation: "This is separate from the objective morphometric analysis and should be treated as subjective, dataset-dependent, and diagnostic.",
+      warning: "Low confidence means the score may be unstable because of quality issues, weak group support, or model disagreement.",
+    },
+    ru: {
+      short: "Показывает опциональный experimental scoring result, обученный на score labels из имён папок.",
+      interpretation: "Этот блок отделён от objective morphometric analysis и должен восприниматься как субъективный, зависящий от датасета и диагностический.",
+      warning: "Низкая уверенность означает, что score может быть нестабильным из-за проблем качества, слабой поддержки группы или расхождения моделей.",
+    },
+  },
+  primary_score: {
+    en: {
+      short: "The main continuous score from the learned regression model.",
+      interpretation: "This is the primary experimental score shown to the user.",
+    },
+    ru: {
+      short: "Основная непрерывная оценка learned regression model.",
+      interpretation: "Именно эта experimental score показывается пользователю как основная.",
+    },
+  },
+  nearest_score_group: {
+    en: {
+      short: "The closest score group present in the training dataset.",
+    },
+    ru: {
+      short: "Ближайшая score-группа из обучающего датасета.",
+    },
+  },
+  component_contribution: {
+    en: {
+      short: "How a feature group shifted the learned score up or down.",
+      interpretation: "This is a model explanation, not an objective score of a face region.",
+    },
+    ru: {
+      short: "Как группа признаков сдвинула learned score вверх или вниз.",
+      interpretation: "Это объяснение модели, а не объективная оценка части лица.",
+    },
+  },
+  top_positive_feature: {
+    en: {
+      short: "A feature that pushed the learned score upward relative to the model baseline.",
+    },
+    ru: {
+      short: "Признак, который сдвинул learned score вверх относительно baseline модели.",
+    },
+  },
+  top_negative_feature: {
+    en: {
+      short: "A feature that pushed the learned score downward relative to the model baseline.",
+    },
+    ru: {
+      short: "Признак, который сдвинул learned score вниз относительно baseline модели.",
+    },
+  },
+  auxiliary_diagnostics: {
+    en: {
+      short: "Secondary scorer models used to check agreement with the primary score.",
+      interpretation: "These diagnostics do not replace the primary learned score.",
+    },
+    ru: {
+      short: "Дополнительные scorer-модели для проверки согласованности с основной оценкой.",
+      interpretation: "Эти diagnostics не заменяют primary learned score.",
+    },
+  },
+  "toggle.mediapipe_points": {
+    en: { short: "Show/hide MediaPipe dense landmark cloud in debug mode." },
+    ru: { short: "Показать/скрыть dense cloud MediaPipe в debug-режиме." },
+  },
+  "toggle.face_oval": {
+    en: { short: "Show/hide MediaPipe face-oval contour lines." },
+    ru: { short: "Показать/скрыть контуры овала лица MediaPipe." },
+  },
+  "toggle.brows": {
+    en: { short: "Show/hide brow-related landmarks and overlays." },
+    ru: { short: "Показать/скрыть brow-ориентированные точки и линии." },
+  },
+  "toggle.cheekbones": {
+    en: { short: "Show/hide cheekbone proxy overlays." },
+    ru: { short: "Показать/скрыть proxy-линии скул." },
+  },
+  "toggle.symmetry_axes": {
+    en: { short: "Show/hide symmetry axis overlays." },
+    ru: { short: "Показать/скрыть оси симметрии." },
   },
   "field.reference_group_selector": {
     en: {
@@ -588,6 +701,58 @@ const HELP_ENTRIES = {
     ru: {
       short: "Признаки с наибольшим абсолютным стандартизованным отклонением от выбранной reference-группы.",
       interpretation: "Эти признаки объясняют, где текущий снимок сильнее всего отличается от reference-распределения.",
+    },
+  },
+  predicted_score: {
+    en: {
+      short: "Continuous score produced by the experimental regression model.",
+      interpretation: "Intermediate values such as 7.09 are model outputs rather than literal folder labels.",
+      warning: "Do not interpret this as an objective fact about the face.",
+    },
+    ru: {
+      short: "Непрерывная оценка, которую выдаёт экспериментальная regression model.",
+      interpretation: "Промежуточные значения вроде 7.09 являются output модели, а не буквальными folder labels.",
+      warning: "Не воспринимайте это как объективный факт о лице.",
+    },
+  },
+  nearest_score_group: {
+    en: {
+      short: "Closest training score group to the predicted continuous score.",
+      interpretation: "This helps relate the regression result back to the discrete score folders seen during training.",
+    },
+    ru: {
+      short: "Ближайшая обучающая score-группа к предсказанной непрерывной оценке.",
+      interpretation: "Это помогает связать regression result с дискретными папками-оценками, которые модель видела при обучении.",
+    },
+  },
+  confidence: {
+    en: {
+      short: "Reliability indicator for the experimental score.",
+      interpretation: "Low confidence usually reflects failed quality checks, sparse score groups, or disagreement between regression and classification.",
+    },
+    ru: {
+      short: "Индикатор надёжности экспериментальной оценки.",
+      interpretation: "Низкая уверенность обычно означает failed quality checks, редкие score-группы или расхождение между regression и classification.",
+    },
+  },
+  predicted_group: {
+    en: {
+      short: "Classifier-only diagnostic prediction for the most likely discrete score group.",
+      interpretation: "This is a side diagnostic baseline. The main score comes from regression.",
+    },
+    ru: {
+      short: "Диагностический prediction classifier-а для наиболее вероятной дискретной score-группы.",
+      interpretation: "Это вспомогательный diagnostic baseline. Основная score-оценка берётся из regression.",
+    },
+  },
+  group_probabilities: {
+    en: {
+      short: "Classifier probabilities over known discrete score groups.",
+      interpretation: "A flat distribution usually indicates low classifier confidence.",
+    },
+    ru: {
+      short: "Вероятности classifier-а по известным дискретным score-группам.",
+      interpretation: "Плоское распределение обычно указывает на низкую уверенность classifier-а.",
     },
   },
   limitations: {

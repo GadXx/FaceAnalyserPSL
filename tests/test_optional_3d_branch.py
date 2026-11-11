@@ -261,6 +261,67 @@ class Optional3DBranchTests(unittest.TestCase):
             self.assertEqual(artifacts.summary["geometry_3d_rows"], 1)
             self.assertEqual(artifacts.summary["three_d_success_rows"], 1)
 
+    def test_feature_extraction_preserves_group_label_metadata_in_geometry_features(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            project_root = Path(temp_dir)
+            _write_base_configs(
+                project_root,
+                three_d_enabled=False,
+                artifacts_manifest_path="data/processed/3d_artifacts/manifest.parquet",
+            )
+
+            preprocessed = pd.DataFrame(
+                [
+                    {
+                        "dataset_name": "testset",
+                        "sample_id": "sample-1",
+                        "subject_id": "subject-1",
+                        "image_id": "image-1",
+                        "split": "train",
+                        "image_path": "data/raw/sample-1.jpg",
+                        "aligned_image_path": "data/processed/aligned_faces/sample-1.jpg",
+                        "reference_model": "default_reference",
+                        "quality_pass": True,
+                        "processing_status": "processed",
+                        "raw_labels": json.dumps({"sex": "female"}),
+                        "normalized_labels": json.dumps(
+                            {
+                                "gender_presentation": "Female",
+                                "age_group": "20-29",
+                                "ethnicity_group": "GroupA",
+                            }
+                        ),
+                        "bbox": json.dumps([20.0, 20.0, 80.0, 100.0]),
+                        "landmarks": json.dumps(
+                            [
+                                [30.0, 40.0],
+                                [70.0, 40.0],
+                                [50.0, 60.0],
+                                [35.0, 80.0],
+                                [65.0, 80.0],
+                            ]
+                        ),
+                        "yaw": 1.0,
+                        "pitch": -1.0,
+                        "roll": 0.5,
+                    }
+                ]
+            )
+            input_path = project_root / "data" / "processed" / "preprocessed_manifest.parquet"
+            input_path.parent.mkdir(parents=True, exist_ok=True)
+            preprocessed.to_parquet(input_path, index=False)
+
+            artifacts = run_feature_extraction(project_root=project_root)
+            geometry_frame = pd.read_parquet(artifacts.geometry_features_path)
+
+            self.assertEqual(len(geometry_frame), 1)
+            self.assertIn("raw_labels", geometry_frame.columns)
+            self.assertIn("normalized_labels", geometry_frame.columns)
+            self.assertEqual(str(geometry_frame.loc[0, "sex_group_normalized"]), "Female")
+            self.assertEqual(str(geometry_frame.loc[0, "age_group_normalized"]), "20-29")
+            self.assertEqual(str(geometry_frame.loc[0, "ethnicity_group_normalized"]), "GroupA")
+            self.assertEqual(int(artifacts.summary["rows_with_group_labels"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

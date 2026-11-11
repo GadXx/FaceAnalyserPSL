@@ -188,7 +188,27 @@
           />
         </SectionCard>
 
+        <SectionCard
+          :title="text.scoreTitle"
+          :eyebrow="text.scoreEyebrow"
+          :description="text.scoreDescription"
+          help-key="section.experimental_score"
+          :locale="locale"
+        >
+          <ExperimentalScoreCard :score="store.scoreResult" :error-message="store.scoreErrorMessage" :locale="locale" />
+        </SectionCard>
+
         <div class="result-grid">
+          <SectionCard
+            :title="text.expandedGeometryTitle"
+            :eyebrow="text.featuresEyebrow"
+            :description="text.expandedGeometryDescription"
+            help-key="section.expanded_geometry"
+            :locale="locale"
+          >
+            <ExpandedGeometryCard :expanded-geometry="store.analysisResult.expanded_geometry" :locale="locale" />
+          </SectionCard>
+
           <SectionCard :title="text.rawMeasurementsTitle" :eyebrow="text.geometryEyebrow" help-key="section.raw_measurements" :locale="locale">
             <KeyValueGrid :value="store.analysisResult.raw_measurements" :locale="locale" />
           </SectionCard>
@@ -208,12 +228,22 @@
 
         <SectionCard :title="text.referenceTitle" :eyebrow="text.referenceEyebrow" help-key="section.reference_comparison" :locale="locale">
           <div class="section-stack">
+            <div
+              v-if="store.analysisResult.reference_comparison.warning"
+              class="alert alert--warning"
+            >
+              <strong>{{ store.analysisResult.reference_comparison.status === 'partial' ? text.referencePartialTitle : text.requestError }}</strong>
+              <span>{{ store.analysisResult.reference_comparison.warning }}</span>
+            </div>
             <KeyValueGrid
               :locale="locale"
               :value="{
                 group_key: store.analysisResult.reference_comparison.selected_group.group_key,
                 sample_count: store.analysisResult.reference_comparison.selected_group.sample_count,
                 complete_case_count: store.analysisResult.reference_comparison.selected_group.complete_case_count,
+                status: store.analysisResult.reference_comparison.status,
+                available_feature_count: store.analysisResult.reference_comparison.available_feature_count,
+                required_feature_count: store.analysisResult.reference_comparison.required_feature_count,
                 mahalanobis_distance: store.analysisResult.reference_comparison.mahalanobis_distance,
               }"
             />
@@ -269,6 +299,8 @@
 import { computed, onMounted, ref, watch } from "vue";
 
 import DeviationList from "../components/DeviationList.vue";
+import ExpandedGeometryCard from "../components/ExpandedGeometryCard.vue";
+import ExperimentalScoreCard from "../components/ExperimentalScoreCard.vue";
 import KeyValueGrid from "../components/KeyValueGrid.vue";
 import LoadingSkeleton from "../components/LoadingSkeleton.vue";
 import MetricLabel from "../components/MetricLabel.vue";

@@ -95,28 +95,35 @@ def write_json(payload: dict[str, Any], path: Path) -> None:
 def read_parquet(path: Path, columns: list[str] | None = None) -> list[dict[str, Any]]:
     try:
         import pandas as pd
+        import pyarrow.parquet as pq
     except ModuleNotFoundError as exc:
         raise RuntimeError(
             "Reading parquet requires pandas and pyarrow in the active Python environment."
         ) from exc
+
+    def _read_single_parquet(parquet_path: Path) -> Any:
+        table = pq.read_table(parquet_path)
+        frame = table.to_pandas()
+        if columns is not None:
+            for column in columns:
+                if column not in frame.columns:
+                    frame[column] = None
+            frame = frame.loc[:, columns]
+        return frame
 
     if path.is_dir():
         shard_paths = sorted(path.glob("*.parquet"))
         if not shard_paths:
             return []
 
-        frames = []
-        for shard_path in shard_paths:
-            shard_frame = pd.read_parquet(shard_path)
-            if columns is not None:
-                for column in columns:
-                    if column not in shard_frame.columns:
-                        shard_frame[column] = None
-                shard_frame = shard_frame.loc[:, columns]
-            frames.append(shard_frame)
-        frame = pd.concat(frames, ignore_index=True, sort=False) if frames else pd.DataFrame(columns=columns)
+        frames = [_read_single_parquet(shard_path) for shard_path in shard_paths]
+        frame = (
+            pd.concat(frames, ignore_index=True, sort=False)
+            if frames
+            else pd.DataFrame(columns=columns)
+        )
     else:
-        frame = pd.read_parquet(path, columns=columns)
+        frame = _read_single_parquet(path)
     return frame.to_dict(orient="records")
 
 

@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from src.face_aesthetics.data.io import read_parquet
+from src.face_aesthetics.features.extraction import reference_feature_columns
 from src.face_aesthetics.models.reference import (
     build_group_combinations,
     compute_mahalanobis_distance,
@@ -49,10 +50,20 @@ def _parse_json_payload(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _is_nonempty(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        stripped = value.strip()
+        return bool(stripped and stripped.lower() not in {"null", "nan"})
+    return not pd.isna(value)
+
+
 def _select_feature_columns(frame: pd.DataFrame, prefixes: list[str]) -> list[str]:
+    allowed_reference_features = set(reference_feature_columns())
     selected: list[str] = []
     for column in frame.columns:
-        if any(column.startswith(prefix) for prefix in prefixes):
+        if any(column.startswith(prefix) for prefix in prefixes) and column in allowed_reference_features:
             selected.append(column)
     return selected
 
@@ -60,27 +71,175 @@ def _select_feature_columns(frame: pd.DataFrame, prefixes: list[str]) -> list[st
 def _manifest_group_frame(
     manifest_frame: pd.DataFrame,
     *,
-    image_id_column: str,
+    join_columns: list[str],
     normalized_labels_column: str,
     group_aliases: dict[str, list[str]],
 ) -> pd.DataFrame:
     rows: list[dict[str, Any]] = []
     for _, record in manifest_frame.iterrows():
         normalized_labels = _parse_json_payload(record.get(normalized_labels_column))
-        row: dict[str, Any] = {image_id_column: record.get(image_id_column)}
+        row: dict[str, Any] = {column: record.get(column) for column in join_columns}
+        row["normalized_labels"] = record.get(normalized_labels_column)
         for canonical_name, aliases in group_aliases.items():
-            value = None
-            for alias in aliases:
-                alias_value = normalized_labels.get(alias)
+            value = record.get(canonical_name)
+            if _is_nonempty(value):
+                row[canonical_name] = str(value).strip()
+                continue
+
+            resolved = None
+            for alias in [canonical_name, *aliases]:
+                alias_value = record.get(alias)
                 if alias_value is None:
-                    continue
-                normalized_value = str(alias_value).strip()
-                if normalized_value:
-                    value = normalized_value
+                    alias_value = normalized_labels.get(alias)
+                if _is_nonempty(alias_value):
+                    normalized_value = str(alias_value).strip()
+                    resolved = normalized_value
                     break
-            row[canonical_name] = value
+            row[canonical_name] = resolved
         rows.append(row)
     return pd.DataFrame(rows)
+
+
+def _rows_with_group_labels(frame: pd.DataFrame, group_columns: list[str]) -> int:
+    if frame.empty:
+        return 0
+    available_columns = [column for column in group_columns if column in frame.columns]
+    if not available_columns:
+        return 0
+
+    def _row_has_labels(record: pd.Series) -> bool:
+        return any(_is_nonempty(record.get(column)) for column in available_columns)
+
+    return int(frame.apply(_row_has_labels, axis=1).sum())
+
+
+def _join_group_labels(
+    features_frame: pd.DataFrame,
+    manifest_groups: pd.DataFrame,
+    *,
+    image_id_column: str,
+    sample_id_column: str,
+    dataset_name_column: str,
+) -> pd.DataFrame:
+    joined = features_frame.copy()
+    joined["_join_row_index"] = np.arange(len(joined), dtype=np.int64)
+
+    for column in manifest_groups.columns:
+        if column not in joined.columns:
+            joined[column] = None
+
+    manifest_by_image = manifest_groups.drop_duplicates(subset=[image_id_column], keep="last")
+    joined = joined.merge(
+        manifest_by_image,
+        on=image_id_column,
+        how="left",
+        suffixes=("", "_manifest"),
+    )
+
+    manifest_suffix_columns = [
+        column for column in joined.columns if column.endswith("_manifest")
+    ]
+    for manifest_column in manifest_suffix_columns:
+        base_column = manifest_column[: -len("_manifest")]
+        if base_column not in joined.columns:
+            joined[base_column] = joined[manifest_column]
+        else:
+            joined[base_column] = joined[base_column].where(
+                joined[base_column].map(_is_nonempty),
+                joined[manifest_column],
+            )
+        joined = joined.drop(columns=[manifest_column])
+
+    join_columns = [column for column in [sample_id_column, dataset_name_column] if column in manifest_groups.columns]
+    if join_columns:
+        manifest_by_sample = manifest_groups.drop_duplicates(subset=join_columns, keep="last")
+        relevant_columns = [
+            column
+            for column in (
+                "sex_group_normalized",
+                "age_group_normalized",
+                "ethnicity_group_normalized",
+                "normalized_labels",
+            )
+            if column in joined.columns
+        ]
+        missing_mask = pd.Series(False, index=joined.index)
+        if relevant_columns:
+            missing_mask = joined[relevant_columns].apply(
+                lambda record: not any(_is_nonempty(value) for value in record.tolist()),
+                axis=1,
+            )
+        fallback_candidates = joined.loc[missing_mask].copy()
+        if not fallback_candidates.empty:
+            fallback_joined = fallback_candidates.merge(
+                manifest_by_sample,
+                on=join_columns,
+                how="left",
+                suffixes=("", "_sample"),
+            )
+            suffix_columns = [
+                column for column in fallback_joined.columns if column.endswith("_sample")
+            ]
+            for suffix_column in suffix_columns:
+                base_column = suffix_column[: -len("_sample")]
+                if base_column not in joined.columns:
+                    joined[base_column] = None
+                target_index = fallback_joined["_join_row_index"].to_numpy(dtype=np.int64)
+                existing_values = joined.loc[target_index, base_column]
+                fallback_values = fallback_joined[suffix_column].to_numpy()
+                joined.loc[target_index, base_column] = existing_values.where(
+                    existing_values.map(_is_nonempty),
+                    fallback_values,
+                )
+    return joined.drop(columns=["_join_row_index"])
+
+
+def _build_skip_summary(
+    *,
+    status: str,
+    reason: str,
+    root: Path,
+    summary_json_path: Path,
+    group_statistics_path: Path,
+    reference_model_path: Path,
+    config_snapshot_path: Path,
+    feature_rows: int,
+    rows_with_group_labels: int,
+    rows_after_join: int,
+    selected_feature_columns: list[str],
+    group_columns: list[str],
+    min_sample_count: int,
+    min_complete_case_count: int,
+    skip_reasons: dict[str, int] | None = None,
+    available_label_columns: list[str] | None = None,
+    missing_label_columns: list[str] | None = None,
+    preserved_existing_artifacts: bool = False,
+) -> dict[str, Any]:
+    return {
+        "status": status,
+        "reason": reason,
+        "feature_rows": int(feature_rows),
+        "rows_with_group_labels": int(rows_with_group_labels),
+        "rows_after_join": int(rows_after_join),
+        "selected_feature_count": int(len(selected_feature_columns)),
+        "selected_feature_columns": selected_feature_columns,
+        "grouping_columns_available": group_columns,
+        "available_label_columns": available_label_columns or [],
+        "missing_label_columns": missing_label_columns or [],
+        "min_sample_count": int(min_sample_count),
+        "minimum_complete_case_count": int(min_complete_case_count),
+        "built_group_count": 0,
+        "skipped_group_count": int(sum((skip_reasons or {}).values())),
+        "skip_reasons": skip_reasons or {},
+        "artifacts_written": False,
+        "preserved_existing_artifacts": preserved_existing_artifacts,
+        "artifacts": {
+            "summary_json_path": summary_json_path.relative_to(root).as_posix(),
+            "group_statistics_path": group_statistics_path.relative_to(root).as_posix(),
+            "reference_model_path": reference_model_path.relative_to(root).as_posix(),
+            "config_snapshot_path": config_snapshot_path.relative_to(root).as_posix(),
+        },
+    }
 
 
 def _resolve_group_columns(config: dict[str, Any], available_group_columns: list[str]) -> list[list[str]]:
@@ -278,34 +437,42 @@ def run_baseline_training(project_root: Path | None = None) -> BaselineTrainingA
     _save_json(config, config_snapshot_path)
 
     features_frame = pd.DataFrame(read_parquet(input_features_path))
+    group_label_columns = list(dict(config["group_label_aliases"]).keys())
     manifest_frame = pd.DataFrame(
         read_parquet(
             group_manifest_path,
             columns=[
                 config["image_id_column"],
+                "dataset_name",
+                "sample_id",
                 config["split_column"],
                 config["normalized_labels_column"],
+                *group_label_columns,
             ],
         )
     )
 
     feature_columns = _select_feature_columns(features_frame, list(config["feature_prefixes"]))
     if features_frame.empty or manifest_frame.empty or not feature_columns:
-        pd.DataFrame(columns=["group_key", "feature_name"]).to_parquet(group_statistics_path, index=False)
-        joblib.dump({"reference_groups": {}}, reference_model_path)
-        summary = {
-            "status": "skipped_no_data",
-            "reason": "Reference model construction requires feature rows, manifest rows, and configured normalized feature columns.",
-            "selected_feature_count": int(len(feature_columns)),
-            "built_group_count": 0,
-            "skipped_group_count": 0,
-            "artifacts": {
-                "summary_json_path": summary_json_path.relative_to(root).as_posix(),
-                "group_statistics_path": group_statistics_path.relative_to(root).as_posix(),
-                "reference_model_path": reference_model_path.relative_to(root).as_posix(),
-                "config_snapshot_path": config_snapshot_path.relative_to(root).as_posix(),
-            },
-        }
+        summary = _build_skip_summary(
+            status="skipped_no_data",
+            reason="Reference model construction requires feature rows, manifest rows, and configured normalized feature columns.",
+            root=root,
+            summary_json_path=summary_json_path,
+            group_statistics_path=group_statistics_path,
+            reference_model_path=reference_model_path,
+            config_snapshot_path=config_snapshot_path,
+            feature_rows=int(len(features_frame)),
+            rows_with_group_labels=0,
+            rows_after_join=0,
+            selected_feature_columns=feature_columns,
+            group_columns=[],
+            min_sample_count=int(config["minimum_group_sample_count"]),
+            min_complete_case_count=int(config["minimum_complete_case_count"]),
+            available_label_columns=[column for column in group_label_columns if column in manifest_frame.columns],
+            missing_label_columns=[column for column in group_label_columns if column not in manifest_frame.columns],
+            preserved_existing_artifacts=group_statistics_path.exists() or reference_model_path.exists(),
+        )
         _save_json(summary, summary_json_path)
         return BaselineTrainingArtifacts(
             summary_json_path=summary_json_path,
@@ -317,25 +484,63 @@ def run_baseline_training(project_root: Path | None = None) -> BaselineTrainingA
 
     manifest_groups = _manifest_group_frame(
         manifest_frame,
-        image_id_column=str(config["image_id_column"]),
+        join_columns=[
+            str(config["image_id_column"]),
+            "sample_id",
+            "dataset_name",
+            str(config["split_column"]),
+        ],
         normalized_labels_column=str(config["normalized_labels_column"]),
         group_aliases=dict(config["group_label_aliases"]),
     )
-    joined = features_frame.merge(
+    rows_with_group_labels_before_join = _rows_with_group_labels(features_frame, group_label_columns)
+    joined = _join_group_labels(
+        features_frame,
         manifest_groups,
-        on=str(config["image_id_column"]),
-        how="inner",
-        suffixes=("", "_manifest"),
+        image_id_column=str(config["image_id_column"]),
+        sample_id_column="sample_id",
+        dataset_name_column="dataset_name",
     )
     joined = _filter_by_split(
         joined,
         split_column=str(config["split_column"]),
         allowed_splits=[str(value) for value in config.get("allowed_reference_splits", [])],
     )
+    rows_with_group_labels_after_join = _rows_with_group_labels(joined, group_label_columns)
 
     available_group_columns = [
-        column for column in dict(config["group_label_aliases"]).keys() if column in joined.columns
+        column
+        for column in group_label_columns
+        if column in joined.columns and joined[column].map(_is_nonempty).any()
     ]
+    if not available_group_columns:
+        summary = _build_skip_summary(
+            status="failed_missing_group_labels",
+            reason="Reference model construction could not resolve any normalized subgroup labels after joining features with the preprocessing manifest.",
+            root=root,
+            summary_json_path=summary_json_path,
+            group_statistics_path=group_statistics_path,
+            reference_model_path=reference_model_path,
+            config_snapshot_path=config_snapshot_path,
+            feature_rows=int(len(features_frame)),
+            rows_with_group_labels=rows_with_group_labels_after_join,
+            rows_after_join=int(len(joined)),
+            selected_feature_columns=feature_columns,
+            group_columns=[],
+            min_sample_count=int(config["minimum_group_sample_count"]),
+            min_complete_case_count=int(config["minimum_complete_case_count"]),
+            available_label_columns=[column for column in group_label_columns if column in joined.columns],
+            missing_label_columns=[column for column in group_label_columns if column not in joined.columns],
+            preserved_existing_artifacts=group_statistics_path.exists() or reference_model_path.exists(),
+        )
+        _save_json(summary, summary_json_path)
+        return BaselineTrainingArtifacts(
+            summary_json_path=summary_json_path,
+            group_statistics_path=group_statistics_path,
+            reference_model_path=reference_model_path,
+            config_snapshot_path=config_snapshot_path,
+            summary=summary,
+        )
     groupings = _resolve_group_columns(config, available_group_columns)
 
     descriptive_rows, reference_entries, skipped_groups = _build_reference_entries(
@@ -346,6 +551,47 @@ def run_baseline_training(project_root: Path | None = None) -> BaselineTrainingA
         minimum_complete_case_count=int(config["minimum_complete_case_count"]),
         percentiles=[float(value) for value in config["percentiles"]],
     )
+
+    built_group_count = sum(len(bucket) for bucket in reference_entries.values())
+    skip_reason_counts: dict[str, int] = {}
+    for skipped_group in skipped_groups:
+        reason = str(skipped_group.get("reason", "unknown"))
+        skip_reason_counts[reason] = skip_reason_counts.get(reason, 0) + 1
+
+    if built_group_count == 0:
+        summary = _build_skip_summary(
+            status="failed_no_reference_groups",
+            reason="Reference model construction produced zero valid groups. Existing reference artifacts were preserved.",
+            root=root,
+            summary_json_path=summary_json_path,
+            group_statistics_path=group_statistics_path,
+            reference_model_path=reference_model_path,
+            config_snapshot_path=config_snapshot_path,
+            feature_rows=int(len(features_frame)),
+            rows_with_group_labels=rows_with_group_labels_after_join,
+            rows_after_join=int(len(joined)),
+            selected_feature_columns=feature_columns,
+            group_columns=available_group_columns,
+            min_sample_count=int(config["minimum_group_sample_count"]),
+            min_complete_case_count=int(config["minimum_complete_case_count"]),
+            skip_reasons=skip_reason_counts,
+            available_label_columns=[column for column in group_label_columns if column in joined.columns],
+            missing_label_columns=[column for column in group_label_columns if column not in joined.columns],
+            preserved_existing_artifacts=group_statistics_path.exists() or reference_model_path.exists(),
+        )
+        summary["groupings_requested"] = groupings
+        summary["allowed_reference_splits"] = [str(value) for value in config.get("allowed_reference_splits", [])]
+        summary["input_feature_rows"] = int(len(features_frame))
+        summary["rows_with_group_labels_before_join"] = int(rows_with_group_labels_before_join)
+        summary["skipped_groups"] = skipped_groups
+        _save_json(summary, summary_json_path)
+        return BaselineTrainingArtifacts(
+            summary_json_path=summary_json_path,
+            group_statistics_path=group_statistics_path,
+            reference_model_path=reference_model_path,
+            config_snapshot_path=config_snapshot_path,
+            summary=summary,
+        )
 
     statistics_frame = pd.DataFrame(descriptive_rows)
     if statistics_frame.empty:
@@ -362,25 +608,33 @@ def run_baseline_training(project_root: Path | None = None) -> BaselineTrainingA
     }
     joblib.dump(reference_payload, reference_model_path)
 
-    built_group_count = sum(len(bucket) for bucket in reference_entries.values())
     summary = {
         "status": "completed",
+        "feature_rows": int(len(features_frame)),
         "input_feature_rows": int(len(features_frame)),
+        "rows_with_group_labels": int(rows_with_group_labels_after_join),
+        "rows_with_group_labels_before_join": int(rows_with_group_labels_before_join),
+        "rows_after_join": int(len(joined)),
         "joined_rows": int(len(joined)),
         "selected_feature_count": int(len(feature_columns)),
         "selected_feature_columns": feature_columns,
         "grouping_columns_available": available_group_columns,
+        "available_label_columns": [column for column in group_label_columns if column in joined.columns],
+        "missing_label_columns": [column for column in group_label_columns if column not in joined.columns],
         "groupings_requested": groupings,
         "allowed_reference_splits": [str(value) for value in config.get("allowed_reference_splits", [])],
         "minimum_group_sample_count": int(config["minimum_group_sample_count"]),
+        "min_sample_count": int(config["minimum_group_sample_count"]),
         "minimum_complete_case_count": int(config["minimum_complete_case_count"]),
         "built_group_count": built_group_count,
         "skipped_group_count": int(len(skipped_groups)),
+        "skip_reasons": skip_reason_counts,
         "built_groups_by_combination": {
             combination_name: int(len(bucket))
             for combination_name, bucket in reference_entries.items()
         },
         "skipped_groups": skipped_groups,
+        "artifacts_written": True,
         "artifacts": {
             "summary_json_path": summary_json_path.relative_to(root).as_posix(),
             "group_statistics_path": group_statistics_path.relative_to(root).as_posix(),
@@ -397,4 +651,3 @@ def run_baseline_training(project_root: Path | None = None) -> BaselineTrainingA
         config_snapshot_path=config_snapshot_path,
         summary=summary,
     )
-

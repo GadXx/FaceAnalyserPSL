@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 from pathlib import Path
 import sys
 
@@ -11,8 +12,29 @@ if str(PROJECT_ROOT) not in sys.path:
 from src.face_aesthetics.pipelines.feature_extraction import run_feature_extraction
 
 
+def _parse_bool(value: str) -> bool:
+    normalized = str(value).strip().lower()
+    if normalized in {"1", "true", "yes", "y", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "n", "off"}:
+        return False
+    raise argparse.ArgumentTypeError(f"Invalid boolean value: {value}")
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run morphometric feature extraction.")
+    parser.add_argument("--mediapipe-delegate", choices=("auto", "cpu", "gpu"), default=None)
+    parser.add_argument("--mediapipe-fallback-to-cpu", type=_parse_bool, default=None)
+    return parser.parse_args()
+
+
 def main() -> None:
-    artifacts = run_feature_extraction(project_root=PROJECT_ROOT)
+    args = _parse_args()
+    artifacts = run_feature_extraction(
+        project_root=PROJECT_ROOT,
+        mediapipe_delegate=args.mediapipe_delegate,
+        mediapipe_fallback_to_cpu=args.mediapipe_fallback_to_cpu,
+    )
     summary = artifacts.summary
 
     print(f"measurements_raw_path={artifacts.measurements_raw_path}")
@@ -22,6 +44,7 @@ def main() -> None:
     print(f"geometry_3d_features_path={artifacts.geometry_3d_features_path}")
     print(f"auxiliary_embeddings_path={artifacts.auxiliary_embeddings_path}")
     print(f"summary_json={artifacts.summary_path}")
+    print(f"mediapipe_runtime_diagnostics={summary.get('mediapipe_runtime_diagnostics_path')}")
     print(f"total_rows={summary['total_rows']}")
     print(f"eligible_rows={summary['eligible_rows']}")
     print(f"processed_rows={summary['processed_rows']}")

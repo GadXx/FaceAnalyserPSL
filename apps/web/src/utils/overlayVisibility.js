@@ -3,7 +3,8 @@ export function pointGroupMatches(group, layers) {
   if (group === "nose") return Boolean(layers.nose);
   if (group === "mouth") return Boolean(layers.mouth);
   if (group === "chin_jaw") return Boolean(layers.chinJaw);
-  if (group === "brows") return Boolean(layers.thirds);
+  if (group === "brows") return Boolean(layers.brows);
+  if (group === "cheekbones") return Boolean(layers.cheekbones);
   if (group === "midline") return Boolean(layers.symmetry);
   return true;
 }
@@ -19,7 +20,9 @@ export function segmentLayerVisible(segment, layers) {
     if (layer === "nose" && !layers.nose) return false;
     if (layer === "mouth" && !layers.mouth) return false;
     if (layer === "chin_jaw" && !layers.chinJaw) return false;
-    if (layer === "brows" && !layers.thirds) return false;
+    if (layer === "brows" && !layers.brows) return false;
+    if (layer === "face_oval" && !layers.faceOval) return false;
+    if (layer === "cheekbones" && !layers.cheekbones) return false;
   }
   return true;
 }

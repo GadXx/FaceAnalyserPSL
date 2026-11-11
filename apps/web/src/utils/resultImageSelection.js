@@ -42,15 +42,15 @@ export function selectResultImage(result, cacheKey, buildArtifactUrl) {
   const generatedArtifacts = result.generated_artifacts ?? {};
   const artifacts = result.artifacts ?? {};
   const visualization = result.visualization ?? {};
+  const previewImage = result.preview_image ?? {};
 
   /** @type {Array<{source: string, path: unknown}>} */
   const candidates = [
+    { source: "preview_image.clean_image_url", path: previewImage.clean_image_url },
     { source: "generated_artifacts.analysis_image_path", path: generatedArtifacts.analysis_image_path },
     { source: "visualization.image_path", path: visualization.image_path },
-    { source: "generated_artifacts.overlay_image_path", path: generatedArtifacts.overlay_image_path },
     { source: "generated_artifacts.measurement_image_path", path: generatedArtifacts.measurement_image_path },
     { source: "artifacts.analysis_image_path", path: artifacts.analysis_image_path },
-    { source: "artifacts.overlay_image_path", path: artifacts.overlay_image_path },
     { source: "artifacts.measurement_image_path", path: artifacts.measurement_image_path },
     { source: "generated_artifacts.aligned_image_path", path: generatedArtifacts.aligned_image_path },
     { source: "artifacts.aligned_image_path", path: artifacts.aligned_image_path },
